@@ -33,6 +33,8 @@
   .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
   .btn-primary:hover { filter: brightness(1.1); }
   .btn-danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+  .btn-good { background: var(--good); color: #000; border-color: var(--good); }
+  .btn-xs { padding: 4px 8px; font-size: 11px; }
   main { padding: 20px; max-width: 1400px; margin: 0 auto; }
   .card {
     background: var(--panel); border: 1px solid var(--border);
@@ -75,14 +77,17 @@
   .pill.mgmt { background: #3d2a0f; color: var(--warn); }
   .pill.remote { background: #1e3a2e; color: var(--good); }
   .pill.resident { background: #2e2a3d; color: #a78bfa; }
+  .pill.status-active { background: #1e3a2e; color: var(--good); }
+  .pill.status-completed { background: #334155; color: var(--muted); }
+  .pill.status-cancelled { background: #3f1c1c; color: var(--bad); }
   .hidden { display: none !important; }
   .error { color: var(--bad); padding: 10px; background: #3f1c1c; border-radius: 6px; margin: 10px 0; }
   .success { color: var(--good); padding: 10px; background: #1e3a2e; border-radius: 6px; margin: 10px 0; }
   .muted { color: var(--muted); font-size: 12px; }
   #login-card { max-width: 400px; margin: 60px auto; }
   .week-nav { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
-  .row-actions { display: flex; gap: 6px; }
-  .row-actions button { padding: 4px 8px; font-size: 11px; }
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .filter-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
 </style>
 </head>
 <body>
@@ -225,9 +230,20 @@
     <button class="btn-primary" id="btn-add-proj">Create project</button>
     <div id="add-proj-msg"></div>
 
-    <h2 style="margin-top: 24px;">Active projects</h2>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 24px;">
+      <h2 style="margin: 0;">Projects</h2>
+      <div class="filter-bar">
+        <label style="margin: 0;">Show:</label>
+        <select id="project-filter">
+          <option value="active">Active only</option>
+          <option value="all">All</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
+    </div>
     <table id="projects-table">
-      <thead><tr><th>Code</th><th>Customer</th><th>Name</th><th>Quoted MD</th><th class="can-see-pricing hidden">Price</th><th>Status</th></tr></thead>
+      <thead><tr><th>Code</th><th>Customer</th><th>Name</th><th>Quoted MD</th><th class="can-see-pricing hidden">Price</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -245,8 +261,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // State
-let me = null;              // engineer row for current user
-let myProjects = [];        // active projects for dropdowns
+let me = null;
+let myProjects = [];
 let weekStart = startOfWeek(new Date());
 
 // ---------- helpers ----------
@@ -261,7 +277,7 @@ function msg(target, text, isError = false) {
 }
 function startOfWeek(d) {
   const x = new Date(d);
-  const day = x.getDay(); // 0 = Sun
+  const day = x.getDay();
   const diff = (day === 0 ? -6 : 1 - day);
   x.setDate(x.getDate() + diff);
   x.setHours(0, 0, 0, 0);
@@ -270,6 +286,7 @@ function startOfWeek(d) {
 function fmtDate(d) { return d.toLocaleDateString('en-SG', { month: 'short', day: 'numeric' }); }
 function fmtDT(s) { return new Date(s).toLocaleString('en-SG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
 function hours(a, b) { return (new Date(b) - new Date(a)) / 36e5; }
+function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 // ---------- auth ----------
 async function initAuth() {
@@ -325,12 +342,12 @@ function switchView(v) {
   if (v === 'manage') { loadEngineers(); loadProjectsTable(); }
 }
 
-// ---------- projects (shared) ----------
+// ---------- projects (dropdown on schedule view — active only) ----------
 async function loadProjects() {
   const { data } = await sb.from('projects').select('*').eq('status', 'active').order('project_code');
   myProjects = data || [];
   const sel = $('#entry-project');
-  sel.innerHTML = myProjects.map(p => `<option value="${p.id}">${p.full_tag} — ${p.customer_name}: ${p.project_name}</option>`).join('');
+  sel.innerHTML = myProjects.map(p => `<option value="${p.id}">${escapeHtml(p.full_tag)} — ${escapeHtml(p.customer_name)}: ${escapeHtml(p.project_name)}</option>`).join('');
 }
 
 // ---------- my schedule ----------
@@ -341,15 +358,15 @@ async function loadMyEntries() {
     .order('start_at', { ascending: false })
     .limit(20);
   const tbody = $('#my-entries-table tbody');
-  if (error) { tbody.innerHTML = `<tr><td colspan="6">${error.message}</td></tr>`; return; }
+  if (error) { tbody.innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`; return; }
   tbody.innerHTML = (data || []).map(e => {
     const h = e.actual_hours ?? hours(e.start_at, e.end_at).toFixed(2);
     const label = e.project ? e.project.full_tag : e.entry_type;
     const status = e.confirmed ? 'Confirmed' : (e.match_status === 'unmatched' ? 'Unmatched' : 'Planned');
     return `<tr>
       <td>${fmtDT(e.start_at)}</td>
-      <td>${e.entry_type}${e.is_cutover ? ' (cutover)' : ''}</td>
-      <td>${label}</td>
+      <td>${escapeHtml(e.entry_type)}${e.is_cutover ? ' (cutover)' : ''}</td>
+      <td>${escapeHtml(label)}</td>
       <td>${h}</td>
       <td><span class="pill">${status}</span></td>
       <td></td>
@@ -406,7 +423,7 @@ async function loadWeekGrid() {
   days.forEach(d => grid.appendChild(cell('day-header', `${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d.getDay() === 0 ? 6 : d.getDay() - 1]}<br>${fmtDate(d)}`)));
 
   (engineers || []).forEach(e => {
-    grid.appendChild(cell('eng-name', `${e.name}<br><span class="pill ${e.engineer_type.slice(0,4)}">${e.engineer_type}</span>`));
+    grid.appendChild(cell('eng-name', `${escapeHtml(e.name)}<br><span class="pill ${e.engineer_type.slice(0,4)}">${escapeHtml(e.engineer_type)}</span>`));
     for (let i = 0; i < 7; i++) {
       const dayStart = new Date(days[i]);
       const dayEnd = new Date(days[i]); dayEnd.setHours(23, 59, 59);
@@ -417,7 +434,7 @@ async function loadWeekGrid() {
       const html = todays.map(x => {
         const tag = x.project ? x.project.full_tag : x.entry_type;
         const cls = x.match_status === 'unmatched' ? 'unmatched' : x.entry_type;
-        return `<div class="entry ${cls}" title="${new Date(x.start_at).toLocaleTimeString()} – ${new Date(x.end_at).toLocaleTimeString()}">${tag}</div>`;
+        return `<div class="entry ${cls}" title="${new Date(x.start_at).toLocaleTimeString()} – ${new Date(x.end_at).toLocaleTimeString()}">${escapeHtml(tag)}</div>`;
       }).join('');
       grid.appendChild(cell('', html));
     }
@@ -443,7 +460,6 @@ $('#btn-add-eng').onclick = async () => {
     p_is_manager: $('#new-eng-manager').checked
   });
   if (error) { msg('add-eng-msg', error.message, true); return; }
-  // Optionally set can_see_pricing (separate update — RPC doesn't accept it, keeping it minimal)
   if ($('#new-eng-pricing').checked) {
     await sb.from('engineers').update({ can_see_pricing: true }).eq('email', $('#new-eng-email').value.toLowerCase());
   }
@@ -455,9 +471,9 @@ async function loadEngineers() {
   const { data } = await sb.from('engineers').select('*').order('name');
   $('#engineers-table tbody').innerHTML = (data || []).map(e => `
     <tr>
-      <td>${e.name}</td>
-      <td>${e.email}</td>
-      <td><span class="pill ${e.engineer_type.slice(0,4)}">${e.engineer_type}</span></td>
+      <td>${escapeHtml(e.name)}</td>
+      <td>${escapeHtml(e.email)}</td>
+      <td><span class="pill ${e.engineer_type.slice(0,4)}">${escapeHtml(e.engineer_type)}</span></td>
       <td>${e.clocking_required ? '✓' : '—'}</td>
       <td>${e.is_manager ? '✓' : '—'}</td>
       <td>${e.active ? '✓' : '—'}</td>
@@ -479,19 +495,57 @@ $('#btn-add-proj').onclick = async () => {
   loadProjects();
   loadProjectsTable();
 };
+$('#project-filter').onchange = () => loadProjectsTable();
+
 async function loadProjectsTable() {
-  const { data } = await sb.from('projects').select('*').order('created_at', { ascending: false });
+  const filter = $('#project-filter').value;
+  let q = sb.from('projects').select('*').order('created_at', { ascending: false });
+  if (filter !== 'all') q = q.eq('status', filter);
+  const { data } = await q;
   const showPrice = me?.can_see_pricing;
-  $('#projects-table tbody').innerHTML = (data || []).map(p => `
-    <tr>
-      <td><strong>${p.full_tag}</strong></td>
-      <td>${p.customer_name}</td>
-      <td>${p.project_name}</td>
-      <td>${p.quoted_office_mandays}+${p.quoted_cutover_mandays}c</td>
-      ${showPrice ? `<td>${p.price_ps ? 'S$' + p.price_ps.toLocaleString() : '—'}</td>` : ''}
-      <td><span class="pill">${p.status}</span></td>
-    </tr>
-  `).join('');
+  $('#projects-table tbody').innerHTML = (data || []).map(p => {
+    const actions = buildProjectActions(p);
+    return `
+      <tr>
+        <td><strong>${escapeHtml(p.full_tag)}</strong></td>
+        <td>${escapeHtml(p.customer_name)}</td>
+        <td>${escapeHtml(p.project_name)}</td>
+        <td>${p.quoted_office_mandays}+${p.quoted_cutover_mandays}c</td>
+        ${showPrice ? `<td>${p.price_ps ? 'S$' + Number(p.price_ps).toLocaleString() : '—'}</td>` : ''}
+        <td><span class="pill status-${p.status}">${p.status}</span></td>
+        <td><div class="row-actions">${actions}</div></td>
+      </tr>
+    `;
+  }).join('') || `<tr><td colspan="7" class="muted">No projects.</td></tr>`;
+
+  // Wire up action buttons after render
+  $$('#projects-table button[data-pid]').forEach(btn => {
+    btn.onclick = () => setProjectStatus(btn.dataset.pid, btn.dataset.newStatus, btn.dataset.label);
+  });
+}
+
+function buildProjectActions(p) {
+  if (p.status === 'active') {
+    return `
+      <button class="btn btn-xs btn-good" data-pid="${p.id}" data-new-status="completed" data-label="complete">Complete</button>
+      <button class="btn btn-xs btn-danger" data-pid="${p.id}" data-new-status="cancelled" data-label="cancel">Cancel</button>
+    `;
+  } else {
+    return `<button class="btn btn-xs" data-pid="${p.id}" data-new-status="active" data-label="reopen">Reopen</button>`;
+  }
+}
+
+async function setProjectStatus(projectId, newStatus, label) {
+  if (label !== 'reopen') {
+    if (!confirm(`Are you sure you want to ${label} this project? Existing time entries remain intact.`)) return;
+  }
+  const { error } = await sb.rpc('rpc_set_project_status', {
+    p_project_id: projectId,
+    p_new_status: newStatus
+  });
+  if (error) { alert('Error: ' + error.message); return; }
+  loadProjectsTable();
+  loadProjects(); // refresh the My Schedule dropdown too
 }
 
 // ---------- go ----------
