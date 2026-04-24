@@ -80,6 +80,8 @@
   .pill.status-active { background: #1e3a2e; color: var(--good); }
   .pill.status-completed { background: #334155; color: var(--muted); }
   .pill.status-cancelled { background: #3f1c1c; color: var(--bad); }
+  .pill.ok { background: #1e3a2e; color: var(--good); }
+  .pill.err { background: #3f1c1c; color: var(--bad); }
   .hidden { display: none !important; }
   .error { color: var(--bad); padding: 10px; background: #3f1c1c; border-radius: 6px; margin: 10px 0; }
   .success { color: var(--good); padding: 10px; background: #1e3a2e; border-radius: 6px; margin: 10px 0; }
@@ -88,6 +90,7 @@
   .week-nav { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
   .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .filter-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+  .calendar-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 </style>
 </head>
 <body>
@@ -118,8 +121,21 @@
 
 <!-- MY SCHEDULE -->
 <div id="view-schedule" class="hidden">
+
+  <!-- Calendar connection status -->
   <div class="card">
-    <h2>Log work entry</h2>
+    <h2>Outlook Calendar sync</h2>
+    <div id="cal-status" class="calendar-status">
+      <span class="muted">Loading…</span>
+    </div>
+    <p class="muted" style="margin-top: 10px;">
+      Events with titles starting with <strong>aznet-</strong> are synced. Everything else is ignored.
+      Format example: <strong>aznet-ptc-arubacx Install phase 1</strong>
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Log work entry (manual)</h2>
     <div class="form-grid">
       <div>
         <label>Type</label>
@@ -159,7 +175,7 @@
   <div class="card">
     <h2>Recent entries</h2>
     <table id="my-entries-table">
-      <thead><tr><th>Date</th><th>Type</th><th>Project</th><th>Hours</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Date</th><th>Type</th><th>Project</th><th>Hours</th><th>Source</th><th>Status</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -258,6 +274,11 @@
 const SUPABASE_URL = 'https://tixgkvsyifuqanupmcic.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpeGdrdnN5aWZ1cWFudXBtY2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMjQyMDEsImV4cCI6MjA5MjYwMDIwMX0.lnXmf4bV6orj64EVpuGS5AgmvpVhM4Amgcvhj39fbtU';
 
+// Microsoft OAuth — public values, safe to ship in the HTML
+const MS_TENANT_ID = 'aznet.sg';   // shortcut for our tenant; Microsoft resolves this to our real tenant ID
+const MS_CLIENT_ID = '390064d5-c524-4166-ae2f-faeef82da5e5';  // see note below
+const MS_SCOPES = 'openid profile email offline_access Calendars.Read User.Read';
+
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // State
@@ -337,9 +358,50 @@ function switchView(v) {
   $$('#nav button[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === v));
   ['schedule','week','manage'].forEach(x => hide($('#view-' + x)));
   show($('#view-' + v));
-  if (v === 'schedule') loadMyEntries();
+  if (v === 'schedule') { loadMyEntries(); loadCalendarStatus(); }
   if (v === 'week') loadWeekGrid();
   if (v === 'manage') { loadEngineers(); loadProjectsTable(); }
+}
+
+// ---------- calendar connection ----------
+async function loadCalendarStatus() {
+  const { data, error } = await sb.rpc('rpc_my_calendar_status');
+  const el = $('#cal-status');
+  if (error) { el.innerHTML = `<span class="error">${escapeHtml(error.message)}</span>`; return; }
+  const row = (data && data[0]) || { connected: false };
+  if (!row.connected) {
+    el.innerHTML = `
+      <span class="pill">Not connected</span>
+      <button class="btn-primary" id="btn-connect-cal">Connect Outlook Calendar</button>
+    `;
+    $('#btn-connect-cal').onclick = startOAuthFlow;
+  } else {
+    const statusPill = row.last_sync_status === 'error'
+      ? `<span class="pill err">Last sync error</span>`
+      : row.last_sync_at
+        ? `<span class="pill ok">Synced</span>`
+        : `<span class="pill">Connected, awaiting first sync</span>`;
+    el.innerHTML = `
+      <span class="pill ok">✓ ${escapeHtml(row.ms_email || '')}</span>
+      ${statusPill}
+      ${row.last_sync_at ? `<span class="muted">Last sync: ${fmtDT(row.last_sync_at)} · ${row.last_sync_event_count} events</span>` : ''}
+      ${row.last_sync_error ? `<div class="error">${escapeHtml(row.last_sync_error)}</div>` : ''}
+      <button class="btn" id="btn-reconnect-cal">Reconnect</button>
+    `;
+    $('#btn-reconnect-cal').onclick = startOAuthFlow;
+  }
+}
+function startOAuthFlow() {
+  const redirectUri = `${SUPABASE_URL}/functions/v1/ms-oauth-callback`;
+  const authUrl = new URL(`https://login.microsoftonline.com/${MS_TENANT_ID}/oauth2/v2.0/authorize`);
+  authUrl.searchParams.set('client_id', MS_CLIENT_ID);
+  authUrl.searchParams.set('response_type', 'code');
+  authUrl.searchParams.set('redirect_uri', redirectUri);
+  authUrl.searchParams.set('response_mode', 'query');
+  authUrl.searchParams.set('scope', MS_SCOPES);
+  authUrl.searchParams.set('state', me.id);  // engineer_id for callback to verify
+  authUrl.searchParams.set('prompt', 'select_account');
+  window.location.href = authUrl.toString();
 }
 
 // ---------- projects (dropdown on schedule view — active only) ----------
@@ -368,8 +430,8 @@ async function loadMyEntries() {
       <td>${escapeHtml(e.entry_type)}${e.is_cutover ? ' (cutover)' : ''}</td>
       <td>${escapeHtml(label)}</td>
       <td>${h}</td>
+      <td><span class="pill">${escapeHtml(e.source || 'manual')}</span></td>
       <td><span class="pill">${status}</span></td>
-      <td></td>
     </tr>`;
   }).join('') || '<tr><td colspan="6" class="muted">No entries yet.</td></tr>';
 }
@@ -518,7 +580,6 @@ async function loadProjectsTable() {
     `;
   }).join('') || `<tr><td colspan="7" class="muted">No projects.</td></tr>`;
 
-  // Wire up action buttons after render
   $$('#projects-table button[data-pid]').forEach(btn => {
     btn.onclick = () => setProjectStatus(btn.dataset.pid, btn.dataset.newStatus, btn.dataset.label);
   });
@@ -545,7 +606,7 @@ async function setProjectStatus(projectId, newStatus, label) {
   });
   if (error) { alert('Error: ' + error.message); return; }
   loadProjectsTable();
-  loadProjects(); // refresh the My Schedule dropdown too
+  loadProjects();
 }
 
 // ---------- go ----------
