@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AZNET Scheduler</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --panel2: #334155;
+    --text: #f1f5f9; --muted: #94a3b8; --accent: #38bdf8;
+    --good: #22c55e; --warn: #f59e0b; --bad: #ef4444;
+    --border: #334155;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px;
+  }
+  header {
+    background: var(--panel); padding: 12px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0; font-size: 18px; }
+  nav { display: flex; gap: 4px; }
+  nav button, .btn {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  nav button.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  nav button:hover:not(.active) { background: #475569; }
+  .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+  .btn-primary:hover { filter: brightness(1.1); }
+  .btn-danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+  main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 20px; margin-bottom: 20px;
+  }
+  .card h2 { margin-top: 0; font-size: 16px; color: var(--accent); }
+  .form-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px; margin-bottom: 12px;
+  }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input, select, textarea {
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
+    font-size: 13px; font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .grid-week { display: grid; grid-template-columns: 140px repeat(7, 1fr); gap: 2px; }
+  .grid-week > div {
+    background: var(--panel2); padding: 6px 8px; min-height: 40px; font-size: 12px;
+  }
+  .grid-week .eng-name { font-weight: 600; background: var(--panel); }
+  .grid-week .day-header { background: var(--panel); color: var(--muted); font-size: 11px; text-align: center; }
+  .grid-week .entry {
+    background: #1e3a5f; border-left: 3px solid var(--accent);
+    padding: 4px 6px; margin-bottom: 2px; border-radius: 3px; font-size: 11px;
+  }
+  .grid-week .entry.leave { background: #3f1c1c; border-left-color: var(--bad); }
+  .grid-week .entry.admin { background: #3d2a0f; border-left-color: var(--warn); }
+  .grid-week .entry.training { background: #1e3a2e; border-left-color: var(--good); }
+  .grid-week .entry.unmatched { background: #3d1e3a; border-left-color: #ec4899; }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 11px; background: var(--panel2); color: var(--muted);
+  }
+  .pill.pro { background: #1e3a5f; color: var(--accent); }
+  .pill.mgmt { background: #3d2a0f; color: var(--warn); }
+  .pill.remote { background: #1e3a2e; color: var(--good); }
+  .pill.resident { background: #2e2a3d; color: #a78bfa; }
+  .hidden { display: none !important; }
+  .error { color: var(--bad); padding: 10px; background: #3f1c1c; border-radius: 6px; margin: 10px 0; }
+  .success { color: var(--good); padding: 10px; background: #1e3a2e; border-radius: 6px; margin: 10px 0; }
+  .muted { color: var(--muted); font-size: 12px; }
+  #login-card { max-width: 400px; margin: 60px auto; }
+  .week-nav { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+  .row-actions { display: flex; gap: 6px; }
+  .row-actions button { padding: 4px 8px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AZNET Scheduler</h1>
+  <nav id="nav" class="hidden">
+    <button data-view="schedule" class="active">My Schedule</button>
+    <button data-view="week">Team Week</button>
+    <button data-view="manage" id="nav-manage" class="hidden">Manage</button>
+    <span style="margin: 0 12px; color: var(--muted); font-size: 12px;" id="user-label"></span>
+    <button id="btn-signout">Sign out</button>
+  </nav>
+</header>
+
+<main id="main">
+
+<!-- LOGIN -->
+<div id="login-card" class="card">
+  <h2>Sign in</h2>
+  <p class="muted">Enter your @aznet.sg email. A sign-in link will be sent.</p>
+  <div class="form-grid">
+    <div><label>Email</label><input type="email" id="login-email" placeholder="you@aznet.sg" /></div>
+  </div>
+  <button class="btn-primary" id="btn-login">Send magic link</button>
+  <div id="login-msg"></div>
+</div>
+
+<!-- MY SCHEDULE -->
+<div id="view-schedule" class="hidden">
+  <div class="card">
+    <h2>Log work entry</h2>
+    <div class="form-grid">
+      <div>
+        <label>Type</label>
+        <select id="entry-type">
+          <option value="project">Project</option>
+          <option value="leave">Leave</option>
+          <option value="admin">Admin</option>
+          <option value="training">Training</option>
+          <option value="standby">Standby</option>
+        </select>
+      </div>
+      <div id="entry-project-wrap">
+        <label>Project</label>
+        <select id="entry-project"></select>
+      </div>
+      <div>
+        <label>Start</label>
+        <input type="datetime-local" id="entry-start" />
+      </div>
+      <div>
+        <label>End</label>
+        <input type="datetime-local" id="entry-end" />
+      </div>
+      <div>
+        <label><input type="checkbox" id="entry-cutover" /> Cutover (after-hours)</label>
+      </div>
+      <div>
+        <label>Actual hours (optional)</label>
+        <input type="number" step="0.25" id="entry-actual" placeholder="leave blank to use duration" />
+      </div>
+    </div>
+    <div><label>Notes</label><textarea id="entry-notes" rows="2"></textarea></div>
+    <button class="btn-primary" id="btn-save-entry" style="margin-top: 10px;">Save entry</button>
+    <div id="entry-msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Recent entries</h2>
+    <table id="my-entries-table">
+      <thead><tr><th>Date</th><th>Type</th><th>Project</th><th>Hours</th><th>Status</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- TEAM WEEK -->
+<div id="view-week" class="hidden">
+  <div class="card">
+    <div class="week-nav">
+      <button id="btn-week-prev">← Prev week</button>
+      <button id="btn-week-today">This week</button>
+      <button id="btn-week-next">Next week →</button>
+      <span id="week-label" style="margin-left: 12px; color: var(--muted);"></span>
+    </div>
+    <div id="week-grid" class="grid-week"></div>
+  </div>
+</div>
+
+<!-- MANAGE (managers only) -->
+<div id="view-manage" class="hidden">
+  <div class="card">
+    <h2>Add engineer</h2>
+    <div class="form-grid">
+      <div><label>Name</label><input id="new-eng-name" /></div>
+      <div><label>Email (@aznet.sg)</label><input id="new-eng-email" type="email" /></div>
+      <div>
+        <label>Type</label>
+        <select id="new-eng-type">
+          <option value="professional">Professional</option>
+          <option value="remote">Remote</option>
+          <option value="resident">Resident</option>
+          <option value="management">Management</option>
+        </select>
+      </div>
+      <div><label><input type="checkbox" id="new-eng-clocking" checked /> Clocking required</label></div>
+      <div><label><input type="checkbox" id="new-eng-manager" /> Is manager</label></div>
+      <div class="can-see-pricing hidden"><label><input type="checkbox" id="new-eng-pricing" /> Can see pricing</label></div>
+    </div>
+    <button class="btn-primary" id="btn-add-eng">Add engineer</button>
+    <div id="add-eng-msg"></div>
+    <p class="muted" style="margin-top: 10px;">
+      ⚠️ After adding here, also create the auth user: Supabase → Authentication → Users → Add user → same email, skip password (magic link only).
+    </p>
+
+    <h2 style="margin-top: 24px;">Engineers</h2>
+    <table id="engineers-table">
+      <thead><tr><th>Name</th><th>Email</th><th>Type</th><th>Clocking</th><th>Manager</th><th>Active</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Create project</h2>
+    <div class="form-grid">
+      <div>
+        <label>Project code (after "aznet-")</label>
+        <input id="new-proj-code" placeholder="e.g. ptc-arubacx" />
+      </div>
+      <div><label>Customer</label><input id="new-proj-customer" /></div>
+      <div><label>Project name</label><input id="new-proj-name" /></div>
+      <div><label>Office man-days</label><input id="new-proj-office" type="number" step="0.5" value="0" /></div>
+      <div><label>Cutover man-days</label><input id="new-proj-cutover" type="number" step="0.5" value="0" /></div>
+      <div class="can-see-pricing hidden"><label>Price (SGD)</label><input id="new-proj-price" type="number" step="0.01" /></div>
+    </div>
+    <div class="muted" style="margin-bottom: 10px;">
+      Engineers will tag events as: <strong id="proj-preview">aznet-</strong>
+    </div>
+    <button class="btn-primary" id="btn-add-proj">Create project</button>
+    <div id="add-proj-msg"></div>
+
+    <h2 style="margin-top: 24px;">Active projects</h2>
+    <table id="projects-table">
+      <thead><tr><th>Code</th><th>Customer</th><th>Name</th><th>Quoted MD</th><th class="can-see-pricing hidden">Price</th><th>Status</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+</main>
+
+<script>
+// =============================================================
+// AZNET Scheduler — single-file client
+// =============================================================
+const SUPABASE_URL = 'https://tixgkvsyifuqanupmcic.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpeGdrdnN5aWZ1cWFudXBtY2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMjQyMDEsImV4cCI6MjA5MjYwMDIwMX0.lnXmf4bV6orj64EVpuGS5AgmvpVhM4Amgcvhj39fbtU';
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// State
+let me = null;              // engineer row for current user
+let myProjects = [];        // active projects for dropdowns
+let weekStart = startOfWeek(new Date());
+
+// ---------- helpers ----------
+const $ = sel => document.querySelector(sel);
+const $$ = sel => document.querySelectorAll(sel);
+function show(el) { el.classList.remove('hidden'); }
+function hide(el) { el.classList.add('hidden'); }
+function msg(target, text, isError = false) {
+  const el = $('#' + target);
+  el.innerHTML = text ? `<div class="${isError ? 'error' : 'success'}">${text}</div>` : '';
+  if (text && !isError) setTimeout(() => el.innerHTML = '', 4000);
+}
+function startOfWeek(d) {
+  const x = new Date(d);
+  const day = x.getDay(); // 0 = Sun
+  const diff = (day === 0 ? -6 : 1 - day);
+  x.setDate(x.getDate() + diff);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+function fmtDate(d) { return d.toLocaleDateString('en-SG', { month: 'short', day: 'numeric' }); }
+function fmtDT(s) { return new Date(s).toLocaleString('en-SG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+function hours(a, b) { return (new Date(b) - new Date(a)) / 36e5; }
+
+// ---------- auth ----------
+async function initAuth() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) await onSignedIn(session);
+  sb.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_IN' && session) await onSignedIn(session);
+    if (event === 'SIGNED_OUT') onSignedOut();
+  });
+}
+async function onSignedIn(session) {
+  const email = session.user.email;
+  const { data: eng, error } = await sb.from('engineers').select('*').eq('email', email.toLowerCase()).maybeSingle();
+  if (error || !eng) {
+    await sb.auth.signOut();
+    $('#login-msg').innerHTML = `<div class="error">Your email (${email}) isn't registered as an engineer. Ask a manager to add you.</div>`;
+    return;
+  }
+  me = eng;
+  hide($('#login-card'));
+  show($('#nav'));
+  $('#user-label').textContent = `${eng.name} · ${eng.engineer_type}`;
+  if (eng.is_manager) show($('#nav-manage'));
+  if (eng.can_see_pricing) $$('.can-see-pricing').forEach(el => el.classList.remove('hidden'));
+  switchView('schedule');
+  await loadProjects();
+}
+function onSignedOut() {
+  me = null;
+  show($('#login-card'));
+  hide($('#nav'));
+  ['schedule','week','manage'].forEach(v => hide($('#view-' + v)));
+}
+$('#btn-login').onclick = async () => {
+  const email = $('#login-email').value.trim().toLowerCase();
+  if (!email.endsWith('@aznet.sg')) { msg('login-msg', 'Must be an @aznet.sg email', true); return; }
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } });
+  if (error) msg('login-msg', error.message, true);
+  else msg('login-msg', 'Magic link sent. Check your inbox.');
+};
+$('#btn-signout').onclick = () => sb.auth.signOut();
+
+// ---------- nav ----------
+$$('#nav button[data-view]').forEach(btn => {
+  btn.onclick = () => switchView(btn.dataset.view);
+});
+function switchView(v) {
+  $$('#nav button[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  ['schedule','week','manage'].forEach(x => hide($('#view-' + x)));
+  show($('#view-' + v));
+  if (v === 'schedule') loadMyEntries();
+  if (v === 'week') loadWeekGrid();
+  if (v === 'manage') { loadEngineers(); loadProjectsTable(); }
+}
+
+// ---------- projects (shared) ----------
+async function loadProjects() {
+  const { data } = await sb.from('projects').select('*').eq('status', 'active').order('project_code');
+  myProjects = data || [];
+  const sel = $('#entry-project');
+  sel.innerHTML = myProjects.map(p => `<option value="${p.id}">${p.full_tag} — ${p.customer_name}: ${p.project_name}</option>`).join('');
+}
+
+// ---------- my schedule ----------
+async function loadMyEntries() {
+  const { data, error } = await sb.from('work_entries')
+    .select('*, project:projects(full_tag,customer_name,project_name)')
+    .eq('engineer_id', me.id)
+    .order('start_at', { ascending: false })
+    .limit(20);
+  const tbody = $('#my-entries-table tbody');
+  if (error) { tbody.innerHTML = `<tr><td colspan="6">${error.message}</td></tr>`; return; }
+  tbody.innerHTML = (data || []).map(e => {
+    const h = e.actual_hours ?? hours(e.start_at, e.end_at).toFixed(2);
+    const label = e.project ? e.project.full_tag : e.entry_type;
+    const status = e.confirmed ? 'Confirmed' : (e.match_status === 'unmatched' ? 'Unmatched' : 'Planned');
+    return `<tr>
+      <td>${fmtDT(e.start_at)}</td>
+      <td>${e.entry_type}${e.is_cutover ? ' (cutover)' : ''}</td>
+      <td>${label}</td>
+      <td>${h}</td>
+      <td><span class="pill">${status}</span></td>
+      <td></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="muted">No entries yet.</td></tr>';
+}
+$('#entry-type').onchange = () => {
+  const isProject = $('#entry-type').value === 'project';
+  $('#entry-project-wrap').classList.toggle('hidden', !isProject);
+};
+$('#btn-save-entry').onclick = async () => {
+  const type = $('#entry-type').value;
+  const projectId = type === 'project' ? $('#entry-project').value : null;
+  const start = $('#entry-start').value;
+  const end = $('#entry-end').value;
+  if (!start || !end) { msg('entry-msg', 'Start and end are required', true); return; }
+  if (type === 'project' && !projectId) { msg('entry-msg', 'Pick a project', true); return; }
+  const { error } = await sb.rpc('rpc_log_work_entry', {
+    p_project_id: projectId,
+    p_entry_type: type,
+    p_start_at: new Date(start).toISOString(),
+    p_end_at: new Date(end).toISOString(),
+    p_is_cutover: $('#entry-cutover').checked,
+    p_notes: $('#entry-notes').value || null,
+    p_actual_hours: $('#entry-actual').value ? parseFloat($('#entry-actual').value) : null
+  });
+  if (error) msg('entry-msg', error.message, true);
+  else { msg('entry-msg', 'Saved'); loadMyEntries(); }
+};
+
+// ---------- team week ----------
+$('#btn-week-prev').onclick = () => { weekStart.setDate(weekStart.getDate() - 7); loadWeekGrid(); };
+$('#btn-week-next').onclick = () => { weekStart.setDate(weekStart.getDate() + 7); loadWeekGrid(); };
+$('#btn-week-today').onclick = () => { weekStart = startOfWeek(new Date()); loadWeekGrid(); };
+
+async function loadWeekGrid() {
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart); d.setDate(d.getDate() + i);
+    days.push(d);
+  }
+  const end = new Date(days[6]); end.setHours(23, 59, 59);
+  $('#week-label').textContent = `${fmtDate(days[0])} – ${fmtDate(days[6])}`;
+
+  const { data: engineers } = await sb.from('engineers').select('*').eq('active', true).order('name');
+  const { data: entries } = await sb.from('work_entries')
+    .select('*, project:projects(full_tag)')
+    .gte('start_at', weekStart.toISOString())
+    .lte('start_at', end.toISOString());
+
+  const grid = $('#week-grid');
+  grid.innerHTML = '';
+  grid.appendChild(cell('eng-name', ''));
+  days.forEach(d => grid.appendChild(cell('day-header', `${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d.getDay() === 0 ? 6 : d.getDay() - 1]}<br>${fmtDate(d)}`)));
+
+  (engineers || []).forEach(e => {
+    grid.appendChild(cell('eng-name', `${e.name}<br><span class="pill ${e.engineer_type.slice(0,4)}">${e.engineer_type}</span>`));
+    for (let i = 0; i < 7; i++) {
+      const dayStart = new Date(days[i]);
+      const dayEnd = new Date(days[i]); dayEnd.setHours(23, 59, 59);
+      const todays = (entries || []).filter(x =>
+        x.engineer_id === e.id &&
+        new Date(x.start_at) >= dayStart && new Date(x.start_at) <= dayEnd
+      );
+      const html = todays.map(x => {
+        const tag = x.project ? x.project.full_tag : x.entry_type;
+        const cls = x.match_status === 'unmatched' ? 'unmatched' : x.entry_type;
+        return `<div class="entry ${cls}" title="${new Date(x.start_at).toLocaleTimeString()} – ${new Date(x.end_at).toLocaleTimeString()}">${tag}</div>`;
+      }).join('');
+      grid.appendChild(cell('', html));
+    }
+  });
+}
+function cell(cls, html) {
+  const d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.innerHTML = html;
+  return d;
+}
+
+// ---------- manage ----------
+$('#new-proj-code').addEventListener('input', e => {
+  $('#proj-preview').textContent = 'aznet-' + (e.target.value || '').toLowerCase();
+});
+$('#btn-add-eng').onclick = async () => {
+  const { error } = await sb.rpc('rpc_add_engineer', {
+    p_name: $('#new-eng-name').value,
+    p_email: $('#new-eng-email').value.toLowerCase(),
+    p_engineer_type: $('#new-eng-type').value,
+    p_clocking_required: $('#new-eng-clocking').checked,
+    p_is_manager: $('#new-eng-manager').checked
+  });
+  if (error) { msg('add-eng-msg', error.message, true); return; }
+  // Optionally set can_see_pricing (separate update — RPC doesn't accept it, keeping it minimal)
+  if ($('#new-eng-pricing').checked) {
+    await sb.from('engineers').update({ can_see_pricing: true }).eq('email', $('#new-eng-email').value.toLowerCase());
+  }
+  msg('add-eng-msg', 'Engineer added. Don\'t forget to create their auth user in Supabase.');
+  ['new-eng-name','new-eng-email'].forEach(id => $('#' + id).value = '');
+  loadEngineers();
+};
+async function loadEngineers() {
+  const { data } = await sb.from('engineers').select('*').order('name');
+  $('#engineers-table tbody').innerHTML = (data || []).map(e => `
+    <tr>
+      <td>${e.name}</td>
+      <td>${e.email}</td>
+      <td><span class="pill ${e.engineer_type.slice(0,4)}">${e.engineer_type}</span></td>
+      <td>${e.clocking_required ? '✓' : '—'}</td>
+      <td>${e.is_manager ? '✓' : '—'}</td>
+      <td>${e.active ? '✓' : '—'}</td>
+    </tr>
+  `).join('');
+}
+$('#btn-add-proj').onclick = async () => {
+  const { error } = await sb.rpc('rpc_create_project', {
+    p_project_code: $('#new-proj-code').value.toLowerCase(),
+    p_customer_name: $('#new-proj-customer').value,
+    p_project_name: $('#new-proj-name').value,
+    p_quoted_office_mandays: parseFloat($('#new-proj-office').value || 0),
+    p_quoted_cutover_mandays: parseFloat($('#new-proj-cutover').value || 0),
+    p_price_ps: $('#new-proj-price').value ? parseFloat($('#new-proj-price').value) : null
+  });
+  if (error) { msg('add-proj-msg', error.message, true); return; }
+  msg('add-proj-msg', 'Project created');
+  ['new-proj-code','new-proj-customer','new-proj-name','new-proj-price'].forEach(id => $('#' + id).value = '');
+  loadProjects();
+  loadProjectsTable();
+};
+async function loadProjectsTable() {
+  const { data } = await sb.from('projects').select('*').order('created_at', { ascending: false });
+  const showPrice = me?.can_see_pricing;
+  $('#projects-table tbody').innerHTML = (data || []).map(p => `
+    <tr>
+      <td><strong>${p.full_tag}</strong></td>
+      <td>${p.customer_name}</td>
+      <td>${p.project_name}</td>
+      <td>${p.quoted_office_mandays}+${p.quoted_cutover_mandays}c</td>
+      ${showPrice ? `<td>${p.price_ps ? 'S$' + p.price_ps.toLocaleString() : '—'}</td>` : ''}
+      <td><span class="pill">${p.status}</span></td>
+    </tr>
+  `).join('');
+}
+
+// ---------- go ----------
+initAuth();
+</script>
+</body>
+</html>
