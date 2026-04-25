@@ -703,7 +703,7 @@ async function renderManage() {
       id, project_code, name, status, full_tag, customer_id, end_user_id,
       customer:customer_id(id, name),
       end_user:end_user_id(id, name),
-      project_engineers(engineer_id, is_lead, engineers(id, name))
+      project_engineers(engineer_id, is_lead, engineers!project_engineers_engineer_id_fkey(id, name))
     `).order('project_code');
   if (projErr) { console.error('Projects query failed:', projErr); toast('Failed to load projects: ' + projErr.message, 'error'); }
 
