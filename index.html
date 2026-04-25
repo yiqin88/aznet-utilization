@@ -227,7 +227,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    flowType: 'pkce',
+    flowType: 'implicit',
     storage: window.localStorage,
     storageKey: 'sb-aznet-scheduler-auth',
     // Disable the multi-tab lock that causes hangs on stale state
