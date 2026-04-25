@@ -160,6 +160,7 @@
   .entry-bubble.standby { background: rgba(139,148,168,0.1); border-left-color: var(--muted); }
   .entry-bubble.training { background: rgba(163,113,247,0.1); border-left-color: var(--accent-2); }
   .entry-bubble.admin { background: rgba(63,185,80,0.1); border-left-color: var(--green); }
+  .entry-bubble.internal { background: rgba(255,123,114,0.1); border-left-color: var(--pink); }
   .entry-bubble strong { display: block; font-size: 11px; }
   .entry-bubble .small { color: var(--muted); font-size: 10px; }
   /* Review states (Step 26b) */
@@ -651,6 +652,7 @@ async function openEntryEditModal(entryId, entries) {
             <option value="admin" ${entry.entry_type==='admin'?'selected':''}>Admin</option>
             <option value="training" ${entry.entry_type==='training'?'selected':''}>Training</option>
             <option value="standby" ${entry.entry_type==='standby'?'selected':''}>Standby</option>
+            <option value="internal" ${entry.entry_type==='internal'?'selected':''}>Internal</option>
           </select>
         </div>
         <div class="modal-row">
