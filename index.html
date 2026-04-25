@@ -19,6 +19,7 @@
     --yellow: #d29922;
     --red: #f85149;
     --pink: #ff7b72;
+    --ms-blue: #2f6fdb;
   }
   * { box-sizing: border-box; }
   body {
@@ -75,6 +76,12 @@
   }
   button.danger { background: var(--red); color: white; }
   button.small { padding: 3px 8px; font-size: 11px; }
+  button.ms-signin {
+    background: var(--ms-blue); color: white; padding: 10px 14px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; font-size: 14px; font-weight: 600;
+  }
+  button.ms-signin svg { width: 18px; height: 18px; }
   .pill {
     display: inline-block; padding: 2px 8px; border-radius: 10px;
     font-size: 11px; font-weight: 500;
@@ -133,20 +140,25 @@
   .modal-row select, .modal-row input { flex: 1; }
   .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 
-  /* Team management modal table */
   .team-mgmt-table { width: 100%; }
   .team-mgmt-table td { padding: 6px 8px; }
   .team-mgmt-table input[type=checkbox], .team-mgmt-table input[type=radio] {
     width: 16px; height: 16px; cursor: pointer;
   }
-  .lead-marker {
-    color: var(--yellow); font-weight: 600;
-  }
+  .lead-marker { color: var(--yellow); font-weight: 600; }
 
   #signin-page {
     display: flex; align-items: center; justify-content: center; min-height: 100vh;
   }
-  #signin-page .panel { width: 360px; }
+  #signin-page .panel { width: 380px; }
+  .divider {
+    display: flex; align-items: center; gap: 12px; margin: 16px 0;
+    color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  }
+  .divider::before, .divider::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
+
   .toast {
     position: fixed; bottom: 24px; right: 24px;
     background: var(--panel); border: 1px solid var(--border);
@@ -167,9 +179,22 @@
 <div id="signin-page" style="display:none">
   <div class="panel">
     <h2>AZNET Scheduler</h2>
-    <p style="color: var(--muted); font-size: 13px;">Sign in with your @aznet.sg email. We'll send you a magic link.</p>
-    <input type="email" id="signin-email" placeholder="you@aznet.sg" style="width: 100%; margin-bottom: 12px;">
-    <button id="signin-btn" style="width: 100%;">Send magic link</button>
+    <p style="color: var(--muted); font-size: 13px;">Sign in with your Microsoft 365 (@aznet.sg) account.</p>
+    <button id="ms-signin-btn" class="ms-signin">
+      <svg viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+        <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+        <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+        <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+      </svg>
+      Sign in with Microsoft
+    </button>
+
+    <div class="divider">or</div>
+
+    <p style="color: var(--muted); font-size: 12px; margin-top: 0;">Magic link fallback:</p>
+    <input type="email" id="signin-email" placeholder="you@aznet.sg" style="width: 100%; margin-bottom: 8px;">
+    <button id="signin-btn" class="secondary" style="width: 100%;">Send magic link</button>
     <p id="signin-msg" style="color: var(--muted); font-size: 12px; margin-top: 12px;"></p>
   </div>
 </div>
@@ -251,6 +276,14 @@ async function checkSession() {
     document.getElementById('app').style.display = 'none';
     return;
   }
+
+  // Enforce @aznet.sg domain — Microsoft SSO might let in other tenants if not configured carefully
+  if (!session.user.email || !session.user.email.toLowerCase().endsWith('@aznet.sg')) {
+    toast('Only @aznet.sg accounts can use this app.', 'error');
+    await sb.auth.signOut();
+    return;
+  }
+
   currentUser = session.user;
   await loadCurrentEngineer();
 
@@ -271,6 +304,19 @@ async function loadCurrentEngineer() {
   canSeePricing = data.can_see_pricing;
 }
 
+// Microsoft sign-in
+document.getElementById('ms-signin-btn').addEventListener('click', async () => {
+  const { error } = await sb.auth.signInWithOAuth({
+    provider: 'azure',
+    options: {
+      scopes: 'openid profile email',
+      redirectTo: window.location.origin + window.location.pathname
+    }
+  });
+  if (error) toast('Microsoft sign-in failed: ' + error.message, 'error');
+});
+
+// Magic link fallback
 document.getElementById('signin-btn').addEventListener('click', async () => {
   const email = document.getElementById('signin-email').value.trim();
   if (!email.endsWith('@aznet.sg')) {
@@ -312,10 +358,11 @@ async function renderMySchedule() {
   const { data: connStatus } = await sb.rpc('rpc_my_calendar_status');
   const conn = (connStatus && connStatus[0]) || null;
 
-  const { data: entries } = await sb.from('work_entries')
+  const { data: entries, error: entriesErr } = await sb.from('work_entries')
     .select('*, projects(project_code, name), customers:customer_id(name)')
     .eq('engineer_id', currentEngineer.id)
     .order('start_at', { ascending: false }).limit(50);
+  if (entriesErr) { console.error('Entries query failed:', entriesErr); toast('Failed to load entries: ' + entriesErr.message, 'error'); }
 
   root.innerHTML = `
     <div class="panel">
@@ -392,7 +439,6 @@ async function renderMySchedule() {
     </div>
   `;
 
-  // Wire events
   if (conn && conn.connected) {
     document.getElementById('sync-now-btn').addEventListener('click', async () => {
       toast('Syncing…', 'info');
@@ -405,9 +451,9 @@ async function renderMySchedule() {
         toast('Synced.', 'success');
       } catch (e) { toast('Sync failed: ' + e.message, 'error'); }
     });
-    document.getElementById('reconnect-btn').addEventListener('click', startMsOAuth);
+    document.getElementById('reconnect-btn').addEventListener('click', startMsCalendarOAuth);
   } else {
-    document.getElementById('connect-btn').addEventListener('click', startMsOAuth);
+    document.getElementById('connect-btn').addEventListener('click', startMsCalendarOAuth);
   }
 
   await populateProjectDropdown('manual-project');
@@ -578,8 +624,8 @@ async function openEntryEditModal(entryId, entries) {
   });
 }
 
-// ============================ MS OAUTH ============================
-function startMsOAuth() {
+// ============================ MS CALENDAR OAUTH (unchanged from before) ============================
+function startMsCalendarOAuth() {
   const params = new URLSearchParams({
     client_id: MS_CLIENT_ID,
     response_type: 'code',
@@ -649,23 +695,17 @@ async function renderTeamWeek() {
 async function renderManage() {
   const root = document.getElementById('view-manage');
 
-  // Engineers
   const { data: engineers } = await sb.from('engineers').select('*').order('name');
-
-  // Customers
   const { data: customers } = await sb.from('customers').select('*').order('name');
 
-  // Projects with their SI/EU customer + assigned engineers
-  const { data: projects } = await sb.from('projects')
+  const { data: projects, error: projErr } = await sb.from('projects')
     .select(`
       id, project_code, name, status, full_tag, customer_id, end_user_id,
       customer:customer_id(id, name),
       end_user:end_user_id(id, name),
-      project_engineers(
-        engineer_id, is_lead,
-        engineers(id, name)
-      )
+      project_engineers(engineer_id, is_lead, engineers(id, name))
     `).order('project_code');
+  if (projErr) { console.error('Projects query failed:', projErr); toast('Failed to load projects: ' + projErr.message, 'error'); }
 
   root.innerHTML = `
     <div class="panel">
@@ -686,7 +726,7 @@ async function renderManage() {
         <label><input type="checkbox" id="eng-pricing"> Can see pricing</label>
         <button id="eng-add">Add engineer</button>
       </div>
-      <p style="color: var(--muted); font-size: 12px;">⚠️ After adding here, also create the auth user: Supabase → Authentication → Users → Add user → same email.</p>
+      <p style="color: var(--muted); font-size: 12px;">⚠️ With Microsoft SSO, engineers can sign in directly — no need to manually create the Supabase auth user.</p>
 
       <h3>Engineers</h3>
       <table>
@@ -740,13 +780,7 @@ async function renderManage() {
       <table>
         <thead>
           <tr>
-            <th>Code</th>
-            <th>Name</th>
-            <th>Customer (SI)</th>
-            <th>End User</th>
-            <th>Team</th>
-            <th>Status</th>
-            <th></th>
+            <th>Code</th><th>Name</th><th>Customer (SI)</th><th>End User</th><th>Team</th><th>Status</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -780,7 +814,6 @@ async function renderManage() {
     </div>
   `;
 
-  // Wire engineers/customers/projects (existing)
   document.getElementById('eng-add').addEventListener('click', async () => {
     const { error } = await sb.rpc('rpc_add_engineer', {
       p_name: document.getElementById('eng-name').value,
@@ -791,7 +824,7 @@ async function renderManage() {
       p_can_see_pricing: document.getElementById('eng-pricing').checked
     });
     if (error) { toast(error.message, 'error'); return; }
-    toast('Engineer added. Remember to create their auth user in Supabase.', 'success');
+    toast('Engineer added.', 'success');
     await renderManage();
   });
 
@@ -843,7 +876,6 @@ async function renderManage() {
     });
   });
 
-  // Manage Team modal
   document.querySelectorAll('.manage-team-btn').forEach(btn => {
     btn.addEventListener('click', () => openManageTeamModal(btn.dataset.id));
   });
@@ -873,12 +905,7 @@ async function openManageTeamModal(projectId) {
         </div>
         <table class="team-mgmt-table">
           <thead>
-            <tr>
-              <th style="width: 40px;">On</th>
-              <th style="width: 40px;" title="Lead">★</th>
-              <th>Engineer</th>
-              <th>Email</th>
-            </tr>
+            <tr><th style="width: 40px;">On</th><th style="width: 40px;" title="Lead">★</th><th>Engineer</th><th>Email</th></tr>
           </thead>
           <tbody>
             ${(engineers || []).map(e => `
@@ -903,17 +930,14 @@ async function openManageTeamModal(projectId) {
     </div>
   `;
 
-  // Lead can only be ticked if their assignment checkbox is also ticked
   c.querySelectorAll('.lead-rb').forEach(rb => {
     rb.addEventListener('change', () => {
       const engId = rb.dataset.eng;
-      if (!engId) return; // "no lead" option
+      if (!engId) return;
       const cb = c.querySelector(`.assign-cb[data-eng="${engId}"]`);
       if (cb && !cb.checked) cb.checked = true;
     });
   });
-
-  // If you uncheck someone who's the current lead, also uncheck the lead radio
   c.querySelectorAll('.assign-cb').forEach(cb => {
     cb.addEventListener('change', () => {
       if (!cb.checked) {
@@ -928,47 +952,28 @@ async function openManageTeamModal(projectId) {
 
   document.getElementById('team-cancel').addEventListener('click', () => c.innerHTML = '');
   document.getElementById('team-save').addEventListener('click', async () => {
-    // Determine target state from UI
     const targetAssigned = new Set();
     c.querySelectorAll('.assign-cb:checked').forEach(cb => targetAssigned.add(cb.dataset.eng));
     const targetLead = c.querySelector('.lead-rb:checked')?.dataset.eng || '';
 
     const errors = [];
-
-    // Unassign anyone removed
     for (const a of (assignments || [])) {
       if (!targetAssigned.has(a.engineer_id)) {
-        const { error } = await sb.rpc('rpc_unassign_engineer', {
-          p_project_id: projectId, p_engineer_id: a.engineer_id
-        });
+        const { error } = await sb.rpc('rpc_unassign_engineer', { p_project_id: projectId, p_engineer_id: a.engineer_id });
         if (error) errors.push(error.message);
       }
     }
-
-    // Assign anyone added (without lead flag for now)
     for (const engId of targetAssigned) {
-      const wasAssigned = assignedSet.has(engId);
-      if (!wasAssigned) {
-        const { error } = await sb.rpc('rpc_assign_engineer', {
-          p_project_id: projectId, p_engineer_id: engId, p_is_lead: false
-        });
+      if (!assignedSet.has(engId)) {
+        const { error } = await sb.rpc('rpc_assign_engineer', { p_project_id: projectId, p_engineer_id: engId, p_is_lead: false });
         if (error) errors.push(error.message);
       }
     }
-
-    // Set lead exactly once at the end (handles all transitions)
     if (targetLead) {
-      const { error } = await sb.rpc('rpc_set_lead_engineer', {
-        p_project_id: projectId, p_engineer_id: targetLead
-      });
+      const { error } = await sb.rpc('rpc_set_lead_engineer', { p_project_id: projectId, p_engineer_id: targetLead });
       if (error) errors.push(error.message);
     } else if (leadId) {
-      // User wants to clear the lead — easiest path: unassign-then-reassign the old lead without lead flag
-      // But they may want to keep the engineer assigned. Use a direct SQL via a small RPC instead — for now
-      // just call rpc_assign_engineer (idempotent upsert) with p_is_lead=false on the old lead
-      const { error } = await sb.rpc('rpc_assign_engineer', {
-        p_project_id: projectId, p_engineer_id: leadId, p_is_lead: false
-      });
+      const { error } = await sb.rpc('rpc_assign_engineer', { p_project_id: projectId, p_engineer_id: leadId, p_is_lead: false });
       if (error) errors.push(error.message);
     }
 
