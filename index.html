@@ -210,6 +210,7 @@
 </head>
 <body>
 
+<div id="boot-loading" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0b0e14;color:#9aa4b2;font:14px/1.4 -apple-system,Segoe UI,sans-serif;z-index:9999">Loading AZNET Scheduler…</div>
 <div id="signin-page" style="display:none">
   <div class="panel">
     <h2>AZNET Scheduler</h2>
@@ -306,19 +307,54 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Concurrency guard: onAuthStateChange + the manual checkSession() at end of
+// script can fire this in parallel during page boot. Only one runs at a time.
+let _checkSessionRunning = false;
+let _checkSessionPending = false;
+
+function hideBootLoading() {
+  const b = document.getElementById('boot-loading');
+  if (b) b.style.display = 'none';
+}
+function showSigninFallback(reason) {
+  hideBootLoading();
+  const signinEl = document.getElementById('signin-page');
+  const appEl = document.getElementById('app');
+  if (signinEl) signinEl.style.display = 'flex';
+  if (appEl) appEl.style.display = 'none';
+  if (reason) console.warn('Falling back to signin:', reason);
+}
+
 async function checkSession() {
+  if (_checkSessionRunning) { _checkSessionPending = true; return; }
+  _checkSessionRunning = true;
+
+  // Watchdog: if anything below hangs > 8s (e.g. Supabase auth stuck on stale
+  // state after refresh), force the signin page so the screen is never blank.
+  let watchdogFired = false;
+  const watchdog = setTimeout(() => {
+    watchdogFired = true;
+    showSigninFallback('checkSession watchdog timeout (8s)');
+    toast('Sign-in took too long. Please try again.', 'error');
+  }, 8000);
+
   const signinEl = document.getElementById('signin-page');
   const appEl = document.getElementById('app');
   try {
+    console.log('[checkSession] start');
     const { data: { session }, error: sessionErr } = await sb.auth.getSession();
+    if (watchdogFired) return;
+    console.log('[checkSession] getSession ok, session?', !!session);
     if (sessionErr) throw sessionErr;
     if (!session) {
+      hideBootLoading();
       signinEl.style.display = 'flex';
       appEl.style.display = 'none';
       return;
     }
     if (!session.user.email || !session.user.email.toLowerCase().endsWith('@aznet.sg')) {
       toast('Only @aznet.sg accounts can use this app.', 'error');
+      hideBootLoading();
       signinEl.style.display = 'flex';
       appEl.style.display = 'none';
       try { await sb.auth.signOut(); } catch (_) {}
@@ -326,12 +362,16 @@ async function checkSession() {
     }
     currentUser = session.user;
     await loadCurrentEngineer();
+    if (watchdogFired) return;
+    console.log('[checkSession] loadCurrentEngineer ok, engineer?', !!currentEngineer);
     if (!currentEngineer) {
+      hideBootLoading();
       signinEl.style.display = 'flex';
       appEl.style.display = 'none';
       return;
     }
     // Show app FIRST, then render — so a render error doesn't leave a blank page
+    hideBootLoading();
     signinEl.style.display = 'none';
     appEl.style.display = 'block';
     try {
@@ -342,9 +382,19 @@ async function checkSession() {
     }
   } catch (err) {
     console.error('Session init failed:', err);
-    toast('Sign-in error: ' + (err.message || err), 'error');
-    signinEl.style.display = 'flex';
-    appEl.style.display = 'none';
+    if (!watchdogFired) {
+      toast('Sign-in error: ' + (err.message || err), 'error');
+      hideBootLoading();
+      signinEl.style.display = 'flex';
+      appEl.style.display = 'none';
+    }
+  } finally {
+    clearTimeout(watchdog);
+    _checkSessionRunning = false;
+    if (_checkSessionPending) {
+      _checkSessionPending = false;
+      checkSession();
+    }
   }
 }
 
@@ -1007,7 +1057,15 @@ async function openManageTeamModal(projectId) {
   });
 }
 
-sb.auth.onAuthStateChange(() => checkSession());
+// Filter: only re-run checkSession on meaningful auth events. TOKEN_REFRESHED
+// fires periodically and doesn't need a re-render; INITIAL_SESSION fires on
+// listener attach which would race with the manual checkSession() below.
+sb.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+    console.log('[auth] event:', event);
+    checkSession();
+  }
+});
 checkSession();
 </script>
 </body>
