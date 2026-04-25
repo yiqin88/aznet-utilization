@@ -1,936 +1,987 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AZNET Scheduler</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root {
-    --bg: #0f172a; --panel: #1e293b; --panel2: #334155;
-    --text: #f1f5f9; --muted: #94a3b8; --accent: #38bdf8;
-    --good: #22c55e; --warn: #f59e0b; --bad: #ef4444;
-    --border: #334155;
+    --bg: #0b0e14;
+    --panel: #131823;
+    --panel-2: #1a2030;
+    --border: #232a3d;
+    --text: #e6edf3;
+    --muted: #8b94a8;
+    --accent: #4cc2ff;
+    --accent-2: #a371f7;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --pink: #ff7b72;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg); color: var(--text); font-size: 14px;
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
   }
   header {
-    background: var(--panel); padding: 12px 20px;
-    display: flex; align-items: center; justify-content: space-between;
+    background: var(--panel);
+    padding: 12px 24px;
     border-bottom: 1px solid var(--border);
-    flex-wrap: wrap; gap: 10px;
+    display: flex; align-items: center; gap: 16px;
+    position: sticky; top: 0; z-index: 10;
   }
-  header h1 { margin: 0; font-size: 18px; }
-  nav { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-  nav button, .btn {
-    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
-    padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  nav { display: flex; gap: 8px; margin-left: auto; }
+  nav button {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text); padding: 6px 14px; border-radius: 6px;
+    cursor: pointer; font-size: 13px;
   }
   nav button.active { background: var(--accent); color: #000; border-color: var(--accent); }
-  nav button:hover:not(.active) { background: #475569; }
-  .btn-primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
-  .btn-primary:hover { filter: brightness(1.1); }
-  .btn-danger { background: var(--bad); color: #fff; border-color: var(--bad); }
-  .btn-good { background: var(--good); color: #000; border-color: var(--good); }
-  .btn-xs { padding: 4px 8px; font-size: 11px; }
-  main { padding: 20px; max-width: 1400px; margin: 0 auto; }
-  .card {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: 8px; padding: 20px; margin-bottom: 20px;
+  nav button:hover:not(.active) { border-color: var(--accent); }
+  main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
   }
-  .card h2 { margin-top: 0; font-size: 16px; color: var(--accent); }
-  .form-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 12px; margin-bottom: 12px;
-  }
-  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-  input, select, textarea {
-    width: 100%; background: var(--bg); color: var(--text);
-    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
-    font-size: 13px; font-family: inherit;
-  }
-  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
-  input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
+  .panel h2 { margin-top: 0; font-size: 15px; color: var(--accent); }
+  .panel h3 { font-size: 14px; color: var(--accent-2); margin-top: 24px; margin-bottom: 8px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
   th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .grid-week { display: grid; grid-template-columns: 160px repeat(7, 1fr); gap: 2px; }
-  .grid-week > div {
-    background: var(--panel2); padding: 6px 8px; min-height: 50px; font-size: 11px;
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  input, select, textarea {
+    background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text); padding: 6px 10px; border-radius: 4px; font-size: 13px;
+    font-family: inherit;
   }
-  .grid-week .eng-name { font-weight: 600; background: var(--panel); }
-  .grid-week .day-header { background: var(--panel); color: var(--muted); font-size: 11px; text-align: center; }
-  .grid-week .entry {
-    background: #1e3a5f; border-left: 3px solid var(--accent);
-    padding: 4px 6px; margin-bottom: 3px; border-radius: 3px;
-    cursor: default;
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  button {
+    background: var(--accent); border: 0; color: #000;
+    padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;
   }
-  .grid-week .entry .e-customer { font-weight: 600; font-size: 11px; }
-  .grid-week .entry .e-project { font-size: 10px; color: var(--muted); font-family: ui-monospace, monospace; }
-  .grid-week .entry .e-raw { font-size: 10px; color: var(--muted); font-style: italic; }
-  .grid-week .entry.leave { background: #3f1c1c; border-left-color: var(--bad); }
-  .grid-week .entry.admin { background: #3d2a0f; border-left-color: var(--warn); }
-  .grid-week .entry.training { background: #1e3a2e; border-left-color: var(--good); }
-  .grid-week .entry.standby { background: #2e2a3d; border-left-color: #a78bfa; }
-  .grid-week .entry.unmatched { background: #3d1e3a; border-left-color: #ec4899; }
+  button:hover { opacity: 0.9; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.secondary {
+    background: transparent; color: var(--text); border: 1px solid var(--border);
+  }
+  button.danger { background: var(--red); color: white; }
+  button.small { padding: 3px 8px; font-size: 11px; }
   .pill {
     display: inline-block; padding: 2px 8px; border-radius: 10px;
-    font-size: 11px; background: var(--panel2); color: var(--muted);
-    white-space: nowrap;
+    font-size: 11px; font-weight: 500;
   }
-  .pill.pro { background: #1e3a5f; color: var(--accent); }
-  .pill.mgmt { background: #3d2a0f; color: var(--warn); }
-  .pill.remote { background: #1e3a2e; color: var(--good); }
-  .pill.resident { background: #2e2a3d; color: #a78bfa; }
-  .pill.status-active { background: #1e3a2e; color: var(--good); }
-  .pill.status-completed { background: #334155; color: var(--muted); }
-  .pill.status-cancelled { background: #3f1c1c; color: var(--bad); }
-  .pill.ok { background: #1e3a2e; color: var(--good); }
-  .pill.err { background: #3f1c1c; color: var(--bad); }
-  .pill.unmatched { background: #3d1e3a; color: #ec4899; }
-  .pill.matched { background: #1e3a2e; color: var(--good); }
-  .pill.leave { background: #3f1c1c; color: var(--bad); }
-  .pill.admin { background: #3d2a0f; color: var(--warn); }
-  .pill.training { background: #1e3a2e; color: var(--good); }
-  .pill.cutover { background: #2e2a3d; color: #a78bfa; }
-  .hidden { display: none !important; }
-  .error { color: var(--bad); padding: 10px; background: #3f1c1c; border-radius: 6px; margin: 10px 0; }
-  .success { color: var(--good); padding: 10px; background: #1e3a2e; border-radius: 6px; margin: 10px 0; }
-  .muted { color: var(--muted); font-size: 12px; }
-  #login-card { max-width: 400px; margin: 60px auto; }
-  .week-nav { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
-  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-  .filter-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
-  .calendar-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .event-title { font-weight: 500; }
-  .entry-row.unmatched-row { background: rgba(236, 72, 153, 0.05); }
+  .pill-green { background: rgba(63,185,80,0.15); color: var(--green); }
+  .pill-yellow { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .pill-red { background: rgba(248,81,73,0.15); color: var(--red); }
+  .pill-blue { background: rgba(76,194,255,0.15); color: var(--accent); }
+  .pill-purple { background: rgba(163,113,247,0.15); color: var(--accent-2); }
+  .pill-gray { background: rgba(139,148,168,0.15); color: var(--muted); }
+  .row-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .row-form label { color: var(--muted); font-size: 12px; }
+  .badge { font-family: ui-monospace, monospace; font-size: 11px; }
+  .calendar-status-card {
+    display: flex; gap: 16px; align-items: center; padding: 12px; background: var(--panel-2);
+    border-radius: 6px; margin-bottom: 16px;
+  }
+  .week-grid {
+    display: grid; grid-template-columns: 180px repeat(7, 1fr);
+    border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+  }
+  .week-grid .cell {
+    padding: 6px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    min-height: 60px; font-size: 11px;
+  }
+  .week-grid .header-cell {
+    background: var(--panel-2); font-weight: 500; color: var(--muted);
+    text-transform: uppercase; font-size: 10px; padding: 8px;
+  }
+  .week-grid .name-cell { background: var(--panel-2); font-weight: 500; }
+  .entry-bubble {
+    background: rgba(76,194,255,0.1); border-left: 3px solid var(--accent);
+    padding: 4px 6px; border-radius: 3px; margin-bottom: 4px;
+  }
+  .entry-bubble.unmatched { background: rgba(248,81,73,0.1); border-left-color: var(--red); }
+  .entry-bubble.leave { background: rgba(210,153,34,0.1); border-left-color: var(--yellow); }
+  .entry-bubble.standby { background: rgba(139,148,168,0.1); border-left-color: var(--muted); }
+  .entry-bubble.training { background: rgba(163,113,247,0.1); border-left-color: var(--accent-2); }
+  .entry-bubble.admin { background: rgba(63,185,80,0.1); border-left-color: var(--green); }
+  .entry-bubble strong { display: block; font-size: 11px; }
+  .entry-bubble .small { color: var(--muted); font-size: 10px; }
 
+  /* Modal */
   .modal-backdrop {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
     display: flex; align-items: center; justify-content: center;
-    z-index: 1000; padding: 20px;
+    z-index: 100;
   }
   .modal {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    padding: 24px; max-width: 600px; width: 100%; max-height: 90vh; overflow: auto;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 24px; min-width: 480px; max-width: 90vw; max-height: 90vh; overflow: auto;
   }
-  .modal h3 { margin-top: 0; color: var(--accent); font-size: 16px; }
-  .modal-footer {
-    display: flex; justify-content: space-between; gap: 10px;
-    margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);
-    flex-wrap: wrap;
+  .modal h3 { margin-top: 0; }
+  .modal-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .modal-row label { width: 100px; color: var(--muted); font-size: 12px; }
+  .modal-row select, .modal-row input { flex: 1; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+  /* Team management modal table */
+  .team-mgmt-table { width: 100%; }
+  .team-mgmt-table td { padding: 6px 8px; }
+  .team-mgmt-table input[type=checkbox], .team-mgmt-table input[type=radio] {
+    width: 16px; height: 16px; cursor: pointer;
   }
-  .modal-footer .right { display: flex; gap: 8px; margin-left: auto; }
-  .hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .lead-marker {
+    color: var(--yellow); font-weight: 600;
+  }
+
+  #signin-page {
+    display: flex; align-items: center; justify-content: center; min-height: 100vh;
+  }
+  #signin-page .panel { width: 360px; }
+  .toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    padding: 12px 16px; border-radius: 6px; max-width: 320px;
+    z-index: 200; animation: slideIn 0.2s ease-out;
+  }
+  .toast.error { border-left-color: var(--red); }
+  .toast.success { border-left-color: var(--green); }
+  @keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>AZNET Scheduler</h1>
-  <nav id="nav" class="hidden">
-    <button data-view="schedule" class="active">My Schedule</button>
-    <button data-view="week">Team Week</button>
-    <button data-view="manage" id="nav-manage" class="hidden">Manage</button>
-    <span style="margin: 0 12px; color: var(--muted); font-size: 12px;" id="user-label"></span>
-    <button id="btn-signout">Sign out</button>
-  </nav>
-</header>
-
-<main id="main">
-
-<!-- LOGIN -->
-<div id="login-card" class="card">
-  <h2>Sign in</h2>
-  <p class="muted">Enter your @aznet.sg email. A sign-in link will be sent.</p>
-  <div class="form-grid">
-    <div><label>Email</label><input type="email" id="login-email" placeholder="you@aznet.sg" /></div>
-  </div>
-  <button class="btn-primary" id="btn-login">Send magic link</button>
-  <div id="login-msg"></div>
-</div>
-
-<!-- MY SCHEDULE -->
-<div id="view-schedule" class="hidden">
-
-  <div class="card">
-    <h2>Outlook Calendar sync</h2>
-    <div id="cal-status" class="calendar-status">
-      <span class="muted">Loading…</span>
-    </div>
-    <p class="muted" style="margin-top: 10px;">
-      Events starting with <strong>aznet-</strong> are synced directly. Invites from known customer/partner email domains are auto-matched when unambiguous, otherwise flagged for review.
-    </p>
-  </div>
-
-  <div class="card">
-    <h2>Log manual entry</h2>
-    <div class="form-grid">
-      <div>
-        <label>Type</label>
-        <select id="entry-type">
-          <option value="project">Project</option>
-          <option value="leave">Leave</option>
-          <option value="admin">Admin</option>
-          <option value="training">Training</option>
-          <option value="standby">Standby</option>
-        </select>
-      </div>
-      <div id="entry-project-wrap">
-        <label>Project</label>
-        <select id="entry-project"></select>
-      </div>
-      <div>
-        <label>Start</label>
-        <input type="datetime-local" id="entry-start" />
-      </div>
-      <div>
-        <label>End</label>
-        <input type="datetime-local" id="entry-end" />
-      </div>
-      <div>
-        <label><input type="checkbox" id="entry-cutover" /> Cutover (after-hours)</label>
-      </div>
-      <div>
-        <label>Actual hours (optional)</label>
-        <input type="number" step="0.25" id="entry-actual" placeholder="leave blank to use duration" />
-      </div>
-    </div>
-    <div><label>Notes</label><textarea id="entry-notes" rows="2"></textarea></div>
-    <button class="btn-primary" id="btn-save-entry" style="margin-top: 10px;">Save entry</button>
-    <div id="entry-msg"></div>
-  </div>
-
-  <div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-      <h2 style="margin: 0;">My entries</h2>
-      <div class="filter-bar">
-        <label style="margin: 0;">Show:</label>
-        <select id="my-entries-filter">
-          <option value="all">All</option>
-          <option value="unmatched">Needs review</option>
-          <option value="upcoming">Upcoming only</option>
-        </select>
-      </div>
-    </div>
-    <table id="my-entries-table">
-      <thead><tr>
-        <th>When</th>
-        <th>Event</th>
-        <th>Customer (SI)</th>
-        <th>Project</th>
-        <th>Hours</th>
-        <th>Source</th>
-        <th>Status</th>
-        <th></th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
+<div id="signin-page" style="display:none">
+  <div class="panel">
+    <h2>AZNET Scheduler</h2>
+    <p style="color: var(--muted); font-size: 13px;">Sign in with your @aznet.sg email. We'll send you a magic link.</p>
+    <input type="email" id="signin-email" placeholder="you@aznet.sg" style="width: 100%; margin-bottom: 12px;">
+    <button id="signin-btn" style="width: 100%;">Send magic link</button>
+    <p id="signin-msg" style="color: var(--muted); font-size: 12px; margin-top: 12px;"></p>
   </div>
 </div>
 
-<!-- TEAM WEEK -->
-<div id="view-week" class="hidden">
-  <div class="card">
-    <div class="week-nav">
-      <button id="btn-week-prev">← Prev week</button>
-      <button id="btn-week-today">This week</button>
-      <button id="btn-week-next">Next week →</button>
-      <span id="week-label" style="margin-left: 12px; color: var(--muted);"></span>
-    </div>
-    <div id="week-grid" class="grid-week"></div>
-  </div>
+<div id="app" style="display:none">
+  <header>
+    <h1>AZNET Scheduler</h1>
+    <nav>
+      <button data-view="my-schedule" class="active">My Schedule</button>
+      <button data-view="team-week">Team Week</button>
+      <button data-view="manage">Manage</button>
+      <button id="signout-btn" class="secondary">Sign out</button>
+    </nav>
+  </header>
+
+  <main>
+    <div id="view-my-schedule"></div>
+    <div id="view-team-week" style="display:none"></div>
+    <div id="view-manage" style="display:none"></div>
+  </main>
 </div>
 
-<!-- MANAGE (managers only) -->
-<div id="view-manage" class="hidden">
-  <div class="card">
-    <h2>Add engineer</h2>
-    <div class="form-grid">
-      <div><label>Name</label><input id="new-eng-name" /></div>
-      <div><label>Email (@aznet.sg)</label><input id="new-eng-email" type="email" /></div>
-      <div>
-        <label>Type</label>
-        <select id="new-eng-type">
-          <option value="professional">Professional</option>
-          <option value="remote">Remote</option>
-          <option value="resident">Resident</option>
-          <option value="management">Management</option>
-        </select>
-      </div>
-      <div><label><input type="checkbox" id="new-eng-clocking" checked /> Clocking required</label></div>
-      <div><label><input type="checkbox" id="new-eng-manager" /> Is manager</label></div>
-      <div class="can-see-pricing hidden"><label><input type="checkbox" id="new-eng-pricing" /> Can see pricing</label></div>
-    </div>
-    <button class="btn-primary" id="btn-add-eng">Add engineer</button>
-    <div id="add-eng-msg"></div>
-    <p class="muted" style="margin-top: 10px;">
-      ⚠️ After adding here, also create the auth user: Supabase → Authentication → Users → Add user → same email.
-    </p>
-
-    <h2 style="margin-top: 24px;">Engineers</h2>
-    <table id="engineers-table">
-      <thead><tr><th>Name</th><th>Email</th><th>Type</th><th>Clocking</th><th>Manager</th><th>Active</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h2>Add customer</h2>
-    <div class="form-grid">
-      <div><label>Customer name</label><input id="new-cust-name" placeholder="e.g. ACME Pte Ltd" /></div>
-      <div><label>Email domains (comma-separated)</label><input id="new-cust-domains" placeholder="acme.com, acme.sg" /></div>
-      <div><label>Notes (optional)</label><input id="new-cust-notes" /></div>
-    </div>
-    <button class="btn-primary" id="btn-add-cust">Add customer</button>
-    <div id="add-cust-msg"></div>
-    <p class="hint">Used for both System Integrators (who send invites/get invoiced) and End Users (beneficiaries). A party can be either or both.</p>
-
-    <h2 style="margin-top: 24px;">Customers</h2>
-    <table id="customers-table">
-      <thead><tr><th>Name</th><th>Email domains</th><th>Active</th><th></th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h2>Create project</h2>
-    <div class="form-grid">
-      <div>
-        <label>Project code (after "aznet-")</label>
-        <input id="new-proj-code" placeholder="e.g. ptc-arubacx" />
-      </div>
-      <div>
-        <label>Customer / SI <span class="hint">(who sends invites & gets invoiced)</span></label>
-        <select id="new-proj-customer"></select>
-      </div>
-      <div>
-        <label>End User <span class="hint">(optional — leave blank if same as SI)</span></label>
-        <select id="new-proj-enduser"></select>
-      </div>
-      <div><label>Project name</label><input id="new-proj-name" /></div>
-      <div><label>Office man-days</label><input id="new-proj-office" type="number" step="0.5" value="0" /></div>
-      <div><label>Cutover man-days</label><input id="new-proj-cutover" type="number" step="0.5" value="0" /></div>
-      <div class="can-see-pricing hidden"><label>Price (SGD)</label><input id="new-proj-price" type="number" step="0.01" /></div>
-    </div>
-    <div class="muted" style="margin-bottom: 10px;">
-      Engineers will tag events as: <strong id="proj-preview">aznet-</strong>
-    </div>
-    <button class="btn-primary" id="btn-add-proj">Create project</button>
-    <div id="add-proj-msg"></div>
-
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 24px;">
-      <h2 style="margin: 0;">Projects</h2>
-      <div class="filter-bar">
-        <label style="margin: 0;">Show:</label>
-        <select id="project-filter">
-          <option value="active">Active only</option>
-          <option value="all">All</option>
-          <option value="completed">Completed</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-      </div>
-    </div>
-    <table id="projects-table">
-      <thead><tr><th>Code</th><th>SI</th><th>EU</th><th>Name</th><th>Quoted MD</th><th class="can-see-pricing hidden">Price</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- EDIT ENTRY MODAL -->
-<div id="edit-modal" class="modal-backdrop hidden">
-  <div class="modal">
-    <h3>Edit entry</h3>
-    <div id="edit-modal-summary" class="muted" style="margin-bottom: 16px;"></div>
-    <div class="form-grid">
-      <div>
-        <label>Type</label>
-        <select id="edit-type">
-          <option value="project">Project</option>
-          <option value="leave">Leave</option>
-          <option value="admin">Admin</option>
-          <option value="training">Training</option>
-          <option value="standby">Standby</option>
-        </select>
-      </div>
-      <div id="edit-project-wrap">
-        <label>Project</label>
-        <select id="edit-project"></select>
-        <div class="hint">Setting a project overrides customer to its SI.</div>
-      </div>
-      <div id="edit-customer-wrap">
-        <label>Customer (SI)</label>
-        <select id="edit-customer"></select>
-        <div class="hint">Use this when no project applies but you want to attribute the time to a customer.</div>
-      </div>
-      <div>
-        <label><input type="checkbox" id="edit-cutover" /> Cutover (after-hours)</label>
-      </div>
-    </div>
-    <div id="edit-msg"></div>
-    <div class="modal-footer">
-      <button class="btn btn-danger" id="edit-delete">Delete entry</button>
-      <div class="right">
-        <button class="btn" id="edit-cancel">Cancel</button>
-        <button class="btn btn-primary" id="edit-save">Save</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-</main>
+<div id="modal-container"></div>
+<div id="toast-container"></div>
 
 <script>
-// =============================================================
-// AZNET Scheduler
-// =============================================================
+// ============================ CONFIG ============================
 const SUPABASE_URL = 'https://tixgkvsyifuqanupmcic.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpeGdrdnN5aWZ1cWFudXBtY2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMjQyMDEsImV4cCI6MjA5MjYwMDIwMX0.lnXmf4bV6orj64EVpuGS5AgmvpVhM4Amgcvhj39fbtU';
-
 const MS_TENANT_ID = 'aznet.sg';
-const MS_CLIENT_ID = '390064d5-c524-4166-ae2f-faeef82da5e5';  // ⚠️ REPLACE
-const MS_SCOPES = 'openid profile email offline_access Calendars.Read User.Read';
+const MS_CLIENT_ID = 'MS_CLIENT_ID_PLACEHOLDER';  // <-- REPLACE WITH REAL ENTRA APP CLIENT ID GUID
+const MS_REDIRECT_URI = `${SUPABASE_URL}/functions/v1/ms-oauth-callback`;
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-let me = null;
-let allProjects = [];
-let allCustomers = [];
-let weekStart = startOfWeek(new Date());
-let editingEntry = null;
+// ============================ STATE ============================
+let currentUser = null;
+let currentEngineer = null;
+let isManager = false;
+let canSeePricing = false;
 
-const $ = sel => document.querySelector(sel);
-const $$ = sel => document.querySelectorAll(sel);
-const show = el => el.classList.remove('hidden');
-const hide = el => el.classList.add('hidden');
-function msg(target, text, isError = false) {
-  const el = $('#' + target);
-  el.innerHTML = text ? `<div class="${isError ? 'error' : 'success'}">${text}</div>` : '';
-  if (text && !isError) setTimeout(() => el.innerHTML = '', 4000);
+// ============================ HELPERS ============================
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('en-SG', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true });
 }
-function startOfWeek(d) {
-  const x = new Date(d);
-  const day = x.getDay();
-  const diff = (day === 0 ? -6 : 1 - day);
-  x.setDate(x.getDate() + diff);
-  x.setHours(0, 0, 0, 0);
-  return x;
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-SG', { day: '2-digit', month: 'short' });
 }
-function fmtDate(d) { return d.toLocaleDateString('en-SG', { month: 'short', day: 'numeric' }); }
-function fmtDT(s) { return new Date(s).toLocaleString('en-SG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
-function hours(a, b) { return ((new Date(b) - new Date(a)) / 36e5); }
-function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function truncate(s, n) { s = String(s ?? ''); return s.length > n ? s.slice(0, n-1) + '…' : s; }
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+function hoursBetween(start, end) {
+  return ((new Date(end) - new Date(start)) / (1000 * 60 * 60)).toFixed(2);
+}
+function toast(msg, kind = 'info') {
+  const c = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast ${kind}`;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 
-async function initAuth() {
+// ============================ AUTH ============================
+async function checkSession() {
   const { data: { session } } = await sb.auth.getSession();
-  if (session) await onSignedIn(session);
-  sb.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'SIGNED_IN' && session) await onSignedIn(session);
-    if (event === 'SIGNED_OUT') onSignedOut();
-  });
-}
-async function onSignedIn(session) {
-  const email = session.user.email;
-  const { data: eng, error } = await sb.from('engineers').select('*').eq('email', email.toLowerCase()).maybeSingle();
-  if (error || !eng) {
-    await sb.auth.signOut();
-    $('#login-msg').innerHTML = `<div class="error">${escapeHtml(email)} isn't registered as an engineer. Ask a manager to add you.</div>`;
+  if (!session) {
+    document.getElementById('signin-page').style.display = 'flex';
+    document.getElementById('app').style.display = 'none';
     return;
   }
-  me = eng;
-  hide($('#login-card'));
-  show($('#nav'));
-  $('#user-label').textContent = `${eng.name} · ${eng.engineer_type}`;
-  if (eng.is_manager) show($('#nav-manage'));
-  if (eng.can_see_pricing) $$('.can-see-pricing').forEach(el => el.classList.remove('hidden'));
-  switchView('schedule');
-  await Promise.all([loadProjectsRef(), loadCustomersRef()]);
-}
-function onSignedOut() {
-  me = null;
-  show($('#login-card'));
-  hide($('#nav'));
-  ['schedule','week','manage'].forEach(v => hide($('#view-' + v)));
-}
-$('#btn-login').onclick = async () => {
-  const email = $('#login-email').value.trim().toLowerCase();
-  if (!email.endsWith('@aznet.sg')) { msg('login-msg', 'Must be an @aznet.sg email', true); return; }
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } });
-  if (error) msg('login-msg', error.message, true);
-  else msg('login-msg', 'Magic link sent. Check your inbox.');
-};
-$('#btn-signout').onclick = () => sb.auth.signOut();
+  currentUser = session.user;
+  await loadCurrentEngineer();
 
-$$('#nav button[data-view]').forEach(btn => { btn.onclick = () => switchView(btn.dataset.view); });
-function switchView(v) {
-  $$('#nav button[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === v));
-  ['schedule','week','manage'].forEach(x => hide($('#view-' + x)));
-  show($('#view-' + v));
-  if (v === 'schedule') { loadMyEntries(); loadCalendarStatus(); }
-  if (v === 'week') loadWeekGrid();
-  if (v === 'manage') { loadEngineers(); loadCustomersTable(); loadProjectsTable(); populateCustomerDropdowns(); }
+  document.getElementById('signin-page').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+
+  await renderMySchedule();
 }
 
-// ---------- calendar connection ----------
-async function loadCalendarStatus() {
-  const { data, error } = await sb.rpc('rpc_my_calendar_status');
-  const el = $('#cal-status');
-  if (error) { el.innerHTML = `<span class="error">${escapeHtml(error.message)}</span>`; return; }
-  const row = (data && data[0]) || { connected: false };
-  if (!row.connected) {
-    el.innerHTML = `
-      <span class="pill">Not connected</span>
-      <button class="btn-primary" id="btn-connect-cal">Connect Outlook Calendar</button>
-    `;
-    $('#btn-connect-cal').onclick = startOAuthFlow;
+async function loadCurrentEngineer() {
+  const { data, error } = await sb.from('engineers').select('*').eq('email', currentUser.email).maybeSingle();
+  if (error || !data) {
+    toast('Your @aznet.sg account is not yet registered as an engineer. Ask a manager.', 'error');
+    return;
+  }
+  currentEngineer = data;
+  isManager = data.is_manager;
+  canSeePricing = data.can_see_pricing;
+}
+
+document.getElementById('signin-btn').addEventListener('click', async () => {
+  const email = document.getElementById('signin-email').value.trim();
+  if (!email.endsWith('@aznet.sg')) {
+    toast('Only @aznet.sg emails are allowed', 'error'); return;
+  }
+  const { error } = await sb.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: window.location.origin + window.location.pathname }
+  });
+  if (error) { toast(error.message, 'error'); return; }
+  document.getElementById('signin-msg').textContent = 'Magic link sent. Check your email.';
+});
+
+document.getElementById('signout-btn').addEventListener('click', async () => {
+  await sb.auth.signOut();
+  location.reload();
+});
+
+// ============================ NAV ============================
+document.querySelectorAll('nav button[data-view]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav button[data-view]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const v = btn.dataset.view;
+    document.getElementById('view-my-schedule').style.display = v === 'my-schedule' ? 'block' : 'none';
+    document.getElementById('view-team-week').style.display = v === 'team-week' ? 'block' : 'none';
+    document.getElementById('view-manage').style.display = v === 'manage' ? 'block' : 'none';
+    if (v === 'team-week') renderTeamWeek();
+    if (v === 'manage') renderManage();
+    if (v === 'my-schedule') renderMySchedule();
+  });
+});
+
+// ============================ MY SCHEDULE ============================
+async function renderMySchedule() {
+  if (!currentEngineer) return;
+  const root = document.getElementById('view-my-schedule');
+
+  const { data: connStatus } = await sb.rpc('rpc_my_calendar_status');
+  const conn = (connStatus && connStatus[0]) || null;
+
+  const { data: entries } = await sb.from('work_entries')
+    .select('*, projects(project_code, name), customers:customer_id(name)')
+    .eq('engineer_id', currentEngineer.id)
+    .order('start_at', { ascending: false }).limit(50);
+
+  root.innerHTML = `
+    <div class="panel">
+      <h2>Calendar Sync</h2>
+      <div class="calendar-status-card">
+        <div style="flex:1">
+          ${conn && conn.connected ? `
+            <strong>Connected</strong> · <span class="badge">${escapeHtml(conn.ms_email || '')}</span><br>
+            <span style="color: var(--muted); font-size: 12px;">
+              Last sync: ${conn.last_sync_at ? fmtDateTime(conn.last_sync_at) : 'never'}
+              ${conn.last_sync_status === 'ok' ? `<span class="pill pill-green">${conn.last_sync_event_count || 0} events</span>` : ''}
+              ${conn.last_sync_status === 'error' ? `<span class="pill pill-red">error: ${escapeHtml(conn.last_sync_error || '')}</span>` : ''}
+            </span>
+          ` : `
+            <strong>Not connected</strong><br>
+            <span style="color: var(--muted); font-size: 12px;">Connect Outlook to auto-import your calendar events.</span>
+          `}
+        </div>
+        <div>
+          ${conn && conn.connected ? `
+            <button id="sync-now-btn">Sync now</button>
+            <button id="reconnect-btn" class="secondary">Reconnect</button>
+          ` : `
+            <button id="connect-btn">Connect Outlook</button>
+          `}
+        </div>
+      </div>
+
+      <h3>Manual entry</h3>
+      <div class="row-form">
+        <input type="datetime-local" id="manual-start" />
+        <input type="datetime-local" id="manual-end" />
+        <select id="manual-type">
+          <option value="project">Project</option>
+          <option value="leave">Leave</option>
+          <option value="admin">Admin</option>
+          <option value="training">Training</option>
+          <option value="standby">Standby</option>
+        </select>
+        <select id="manual-project"><option value="">Select project…</option></select>
+        <label><input type="checkbox" id="manual-cutover"> cutover</label>
+        <input type="text" id="manual-title" placeholder="Title (optional)" style="flex:1; min-width: 200px;">
+        <button id="manual-save">Save entry</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex; justify-content: space-between; align-items: center;">
+        <h2>My entries</h2>
+        <div>
+          <label style="color: var(--muted); font-size: 12px;">Show:</label>
+          <select id="entries-filter">
+            <option value="all">All</option>
+            <option value="unmatched">Unmatched only</option>
+            <option value="unconfirmed">Unconfirmed only</option>
+          </select>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Event</th>
+            <th>Customer (SI)</th>
+            <th>Project</th>
+            <th>Hours</th>
+            <th>Source</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="my-entries-body"></tbody>
+      </table>
+    </div>
+  `;
+
+  // Wire events
+  if (conn && conn.connected) {
+    document.getElementById('sync-now-btn').addEventListener('click', async () => {
+      toast('Syncing…', 'info');
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/sync-calendars?engineer_id=${currentEngineer.id}`, {
+          headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY }
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await renderMySchedule();
+        toast('Synced.', 'success');
+      } catch (e) { toast('Sync failed: ' + e.message, 'error'); }
+    });
+    document.getElementById('reconnect-btn').addEventListener('click', startMsOAuth);
   } else {
-    const statusPill = row.last_sync_status === 'error'
-      ? `<span class="pill err">Last sync error</span>`
-      : row.last_sync_at
-        ? `<span class="pill ok">Synced</span>`
-        : `<span class="pill">Connected, awaiting first sync</span>`;
-    el.innerHTML = `
-      <span class="pill ok">✓ ${escapeHtml(row.ms_email || '')}</span>
-      ${statusPill}
-      ${row.last_sync_at ? `<span class="muted">Last sync: ${fmtDT(row.last_sync_at)} · ${row.last_sync_event_count} events</span>` : ''}
-      ${row.last_sync_error ? `<div class="error">${escapeHtml(row.last_sync_error)}</div>` : ''}
-      <button class="btn" id="btn-sync-now">Sync now</button>
-      <button class="btn" id="btn-reconnect-cal">Reconnect</button>
-    `;
-    $('#btn-reconnect-cal').onclick = startOAuthFlow;
-    $('#btn-sync-now').onclick = syncNow;
+    document.getElementById('connect-btn').addEventListener('click', startMsOAuth);
   }
-}
-async function syncNow() {
-  const btn = $('#btn-sync-now');
-  btn.disabled = true; btn.textContent = 'Syncing…';
-  try {
-    await fetch(`${SUPABASE_URL}/functions/v1/sync-calendars?engineer_id=${me.id}`);
-    await loadCalendarStatus();
-    await loadMyEntries();
-  } catch (e) {
-    alert('Sync failed: ' + e.message);
-  } finally {
-    const b = $('#btn-sync-now'); if (b) { b.disabled = false; b.textContent = 'Sync now'; }
-  }
-}
-function startOAuthFlow() {
-  const redirectUri = `${SUPABASE_URL}/functions/v1/ms-oauth-callback`;
-  const authUrl = new URL(`https://login.microsoftonline.com/${MS_TENANT_ID}/oauth2/v2.0/authorize`);
-  authUrl.searchParams.set('client_id', MS_CLIENT_ID);
-  authUrl.searchParams.set('response_type', 'code');
-  authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('response_mode', 'query');
-  authUrl.searchParams.set('scope', MS_SCOPES);
-  authUrl.searchParams.set('state', me.id);
-  authUrl.searchParams.set('prompt', 'select_account');
-  window.location.href = authUrl.toString();
+
+  await populateProjectDropdown('manual-project');
+
+  document.getElementById('manual-save').addEventListener('click', async () => {
+    const start = document.getElementById('manual-start').value;
+    const end = document.getElementById('manual-end').value;
+    const type = document.getElementById('manual-type').value;
+    const project = document.getElementById('manual-project').value;
+    const cutover = document.getElementById('manual-cutover').checked;
+    const title = document.getElementById('manual-title').value;
+
+    if (!start || !end) { toast('Pick start + end', 'error'); return; }
+
+    const { error } = await sb.rpc('rpc_log_work_entry', {
+      p_start_at: new Date(start).toISOString(),
+      p_end_at: new Date(end).toISOString(),
+      p_entry_type: type,
+      p_project_id: project || null,
+      p_is_cutover: cutover,
+      p_raw_title: title || null
+    });
+    if (error) { toast(error.message, 'error'); return; }
+    toast('Saved.', 'success');
+    await renderMySchedule();
+  });
+
+  document.getElementById('entries-filter').addEventListener('change', () => renderEntriesTable(entries));
+  renderEntriesTable(entries);
 }
 
-// ---------- reference data ----------
-async function loadProjectsRef() {
-  const { data } = await sb.from('projects').select('id, project_code, full_tag, customer_id, end_user_id, customer_name, project_name, status');
-  allProjects = data || [];
-  refreshProjectSelects();
-}
-async function loadCustomersRef() {
-  const { data } = await sb.from('customers').select('*').order('name');
-  allCustomers = data || [];
-}
-function refreshProjectSelects() {
-  const active = allProjects.filter(p => p.status === 'active').sort((a,b) => a.project_code.localeCompare(b.project_code));
-  const opts = active.map(p => `<option value="${p.id}">${escapeHtml(p.full_tag)} — ${escapeHtml(p.customer_name)}: ${escapeHtml(p.project_name)}</option>`).join('');
-  ['#entry-project', '#edit-project'].forEach(sel => { const el = $(sel); if (el) el.innerHTML = opts; });
-}
+function renderEntriesTable(entries) {
+  const filter = document.getElementById('entries-filter').value;
+  const tbody = document.getElementById('my-entries-body');
+  let rows = entries || [];
+  if (filter === 'unmatched') rows = rows.filter(e => e.match_status === 'unmatched');
+  if (filter === 'unconfirmed') rows = rows.filter(e => !e.confirmed);
 
-// ---------- my entries ----------
-$('#my-entries-filter').onchange = () => loadMyEntries();
+  tbody.innerHTML = rows.map(e => {
+    const proj = e.projects;
+    const cust = e.customers;
+    return `<tr>
+      <td>${escapeHtml(fmtDateTime(e.start_at))}</td>
+      <td>${escapeHtml(e.raw_title || '—')} ${e.is_cutover ? '<span class="pill pill-purple">cutover</span>' : ''}</td>
+      <td>${cust ? escapeHtml(cust.name) : '—'}</td>
+      <td>${proj ? `<span class="badge">${escapeHtml(proj.project_code)}</span>` : '—'}</td>
+      <td>${hoursBetween(e.start_at, e.end_at)}</td>
+      <td><span class="pill pill-gray">${escapeHtml(e.source)}</span></td>
+      <td>${e.match_status === 'matched'
+        ? '<span class="pill pill-green">matched</span>'
+        : '<span class="pill pill-red">unmatched</span>'}
+        ${e.confirmed ? ' <span class="pill pill-blue">confirmed</span>' : ''}</td>
+      <td><button class="small secondary edit-entry-btn" data-id="${e.id}">Edit</button></td>
+    </tr>`;
+  }).join('');
 
-async function loadMyEntries() {
-  const filter = $('#my-entries-filter').value;
-  let q = sb.from('work_entries')
-    .select('*, project:projects(id, full_tag, customer_name, project_name, customer_id, end_user_id), customer:customers!work_entries_customer_id_fkey(id, name)')
-    .eq('engineer_id', me.id)
-    .order('start_at', { ascending: false })
-    .limit(50);
-  if (filter === 'unmatched') q = q.eq('match_status', 'unmatched');
-  if (filter === 'upcoming') q = q.gte('start_at', new Date().toISOString()).order('start_at', { ascending: true });
-
-  const { data, error } = await q;
-  const tbody = $('#my-entries-table tbody');
-  if (error) { tbody.innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`; return; }
-  tbody.innerHTML = (data || []).map(renderEntryRow).join('') || '<tr><td colspan="8" class="muted">No entries.</td></tr>';
-
-  $$('#my-entries-table button[data-entry-id]').forEach(btn => {
-    btn.onclick = () => openEditModal(btn.dataset.entryId);
+  tbody.querySelectorAll('.edit-entry-btn').forEach(btn => {
+    btn.addEventListener('click', () => openEntryEditModal(btn.dataset.id, entries));
   });
 }
 
-function renderEntryRow(e) {
-  const h = e.actual_hours ?? hours(e.start_at, e.end_at).toFixed(2);
-  const eventLabel = e.raw_title || e.notes || `(${e.entry_type})`;
-  // Customer: prefer project's customer name, else directly-linked customer, else dash
-  const customerLabel = e.project?.customer_name || e.customer?.name || '—';
-  const projectLabel = e.project?.full_tag || (e.entry_type !== 'project' ? `(${e.entry_type})` : '—');
-  const statusPill = `<span class="pill ${e.match_status}">${e.match_status}</span>`;
-  const cutoverPill = e.is_cutover ? ' <span class="pill cutover">cutover</span>' : '';
-  const typePill = e.entry_type !== 'project' ? `<span class="pill ${e.entry_type}">${e.entry_type}</span> ` : '';
-  const rowClass = e.match_status === 'unmatched' ? 'entry-row unmatched-row' : 'entry-row';
-  return `<tr class="${rowClass}">
-    <td>${fmtDT(e.start_at)}</td>
-    <td><div class="event-title">${typePill}${escapeHtml(truncate(eventLabel, 60))}${cutoverPill}</div></td>
-    <td>${escapeHtml(customerLabel)}</td>
-    <td>${e.project ? `<code>${escapeHtml(projectLabel)}</code>` : '<span class="muted">—</span>'}</td>
-    <td>${h}</td>
-    <td><span class="pill">${escapeHtml(e.source || 'manual')}</span></td>
-    <td>${statusPill}</td>
-    <td><button class="btn btn-xs" data-entry-id="${e.id}">Edit</button></td>
-  </tr>`;
-}
-
-// ---------- edit entry modal ----------
-function openEditModal(entryId) {
-  sb.from('work_entries').select('*').eq('id', entryId).maybeSingle().then(({ data, error }) => {
-    if (error || !data) { alert('Could not load entry: ' + (error?.message || 'not found')); return; }
-    editingEntry = data;
-    $('#edit-modal-summary').innerHTML = `
-      <strong>${escapeHtml(data.raw_title || data.notes || '(no title)')}</strong><br>
-      ${fmtDT(data.start_at)} – ${fmtDT(data.end_at)}
-    `;
-    populateEditCustomerDropdown();
-    $('#edit-type').value = data.entry_type;
-    $('#edit-project').value = data.project_id || '';
-    $('#edit-customer').value = data.customer_id || '';
-    $('#edit-cutover').checked = data.is_cutover;
-    updateEditModalLock();
-    $('#edit-msg').innerHTML = '';
-    show($('#edit-modal'));
-  });
-}
-function populateEditCustomerDropdown() {
-  const opts = ['<option value="">(none)</option>'].concat(
-    allCustomers.filter(c => c.active).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
+async function populateProjectDropdown(selectId, selectedId = null) {
+  const { data } = await sb.from('projects').select('id, project_code, name, customers:customer_id(name)').eq('status', 'active').order('project_code');
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Select project…</option>' + (data || []).map(p =>
+    `<option value="${p.id}" ${p.id === selectedId ? 'selected' : ''}>${escapeHtml(p.project_code)} — ${escapeHtml(p.name || '')} (${escapeHtml(p.customers?.name || 'no SI')})</option>`
   ).join('');
-  $('#edit-customer').innerHTML = opts;
+  if (selectedId) sel.value = selectedId;
+  else if (cur) sel.value = cur;
 }
-function updateEditModalLock() {
-  const type = $('#edit-type').value;
-  const projectId = $('#edit-project').value;
-  const isProject = type === 'project';
-  $('#edit-project-wrap').classList.toggle('hidden', !isProject);
-  // If project selected, customer field becomes locked and auto-fills to project's customer
-  if (isProject && projectId) {
-    const proj = allProjects.find(p => p.id === projectId);
-    if (proj) $('#edit-customer').value = proj.customer_id || '';
-    $('#edit-customer').disabled = true;
-  } else {
-    $('#edit-customer').disabled = false;
+
+// ============================ ENTRY EDIT MODAL ============================
+async function openEntryEditModal(entryId, entries) {
+  const entry = entries.find(e => e.id === entryId);
+  if (!entry) return;
+
+  const { data: customers } = await sb.from('customers').select('id, name').eq('active', true).order('name');
+  const { data: projects } = await sb.from('projects').select('id, project_code, name, customer_id').eq('status', 'active').order('project_code');
+
+  const c = document.getElementById('modal-container');
+  c.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal">
+        <h3>Edit entry</h3>
+        <div style="color: var(--muted); font-size: 12px; margin-bottom: 12px;">
+          ${escapeHtml(fmtDateTime(entry.start_at))} → ${escapeHtml(fmtDateTime(entry.end_at))}<br>
+          ${escapeHtml(entry.raw_title || '')}
+        </div>
+        <div class="modal-row">
+          <label>Type</label>
+          <select id="edit-type">
+            <option value="project" ${entry.entry_type==='project'?'selected':''}>Project</option>
+            <option value="leave" ${entry.entry_type==='leave'?'selected':''}>Leave</option>
+            <option value="admin" ${entry.entry_type==='admin'?'selected':''}>Admin</option>
+            <option value="training" ${entry.entry_type==='training'?'selected':''}>Training</option>
+            <option value="standby" ${entry.entry_type==='standby'?'selected':''}>Standby</option>
+          </select>
+        </div>
+        <div class="modal-row" id="edit-project-row">
+          <label>Project</label>
+          <select id="edit-project">
+            <option value="">— none —</option>
+            ${(projects || []).map(p => `<option value="${p.id}" data-cust="${p.customer_id || ''}" ${p.id===entry.project_id?'selected':''}>${escapeHtml(p.project_code)} — ${escapeHtml(p.name || '')}</option>`).join('')}
+          </select>
+        </div>
+        <div class="modal-row" id="edit-customer-row">
+          <label>Customer (SI)</label>
+          <select id="edit-customer">
+            <option value="">— none —</option>
+            ${(customers || []).map(c => `<option value="${c.id}" ${c.id===entry.customer_id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="modal-row">
+          <label>Cutover</label>
+          <input type="checkbox" id="edit-cutover" ${entry.is_cutover?'checked':''}>
+        </div>
+        <div class="modal-actions">
+          <button id="edit-delete" class="danger">Delete entry</button>
+          <button id="edit-cancel" class="secondary">Cancel</button>
+          <button id="edit-save">Save</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  function syncCustomerLock() {
+    const projSel = document.getElementById('edit-project');
+    const custSel = document.getElementById('edit-customer');
+    const opt = projSel.options[projSel.selectedIndex];
+    const linkedCust = opt?.dataset?.cust;
+    if (linkedCust) {
+      custSel.value = linkedCust;
+      custSel.disabled = true;
+    } else {
+      custSel.disabled = false;
+    }
   }
+  document.getElementById('edit-project').addEventListener('change', syncCustomerLock);
+  syncCustomerLock();
+
+  document.getElementById('edit-cancel').addEventListener('click', () => c.innerHTML = '');
+  document.getElementById('edit-delete').addEventListener('click', async () => {
+    if (!confirm('Delete this entry?')) return;
+    const { error } = await sb.rpc('rpc_delete_work_entry', { p_entry_id: entryId });
+    if (error) { toast(error.message, 'error'); return; }
+    toast('Deleted.', 'success');
+    c.innerHTML = '';
+    await renderMySchedule();
+  });
+  document.getElementById('edit-save').addEventListener('click', async () => {
+    const t = document.getElementById('edit-type').value;
+    const p = document.getElementById('edit-project').value || null;
+    const cu = document.getElementById('edit-customer').value || null;
+    const co = document.getElementById('edit-cutover').checked;
+    const { error } = await sb.rpc('rpc_reassign_work_entry', {
+      p_entry_id: entryId,
+      p_entry_type: t,
+      p_project_id: p,
+      p_customer_id: cu,
+      p_is_cutover: co
+    });
+    if (error) { toast(error.message, 'error'); return; }
+    toast('Updated.', 'success');
+    c.innerHTML = '';
+    await renderMySchedule();
+  });
 }
-$('#edit-type').onchange = updateEditModalLock;
-$('#edit-project').onchange = updateEditModalLock;
-$('#edit-cancel').onclick = () => { hide($('#edit-modal')); editingEntry = null; };
-$('#edit-save').onclick = async () => {
-  if (!editingEntry) return;
-  const type = $('#edit-type').value;
-  const projectId = type === 'project' ? $('#edit-project').value || null : null;
-  const customerId = $('#edit-customer').value || null;
-  if (type === 'project' && !projectId) { msg('edit-msg', 'Pick a project', true); return; }
-  const { error } = await sb.rpc('rpc_reassign_work_entry', {
-    p_entry_id: editingEntry.id,
-    p_entry_type: type,
-    p_project_id: projectId,
-    p_is_cutover: $('#edit-cutover').checked,
-    p_customer_id: customerId
+
+// ============================ MS OAUTH ============================
+function startMsOAuth() {
+  const params = new URLSearchParams({
+    client_id: MS_CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: MS_REDIRECT_URI,
+    response_mode: 'query',
+    scope: 'openid profile email offline_access Calendars.Read User.Read',
+    state: currentEngineer.id
   });
-  if (error) { msg('edit-msg', error.message, true); return; }
-  hide($('#edit-modal'));
-  editingEntry = null;
-  loadMyEntries();
-};
-$('#edit-delete').onclick = async () => {
-  if (!editingEntry) return;
-  if (!confirm('Delete this entry? The original Outlook event is not affected.')) return;
-  const { error } = await sb.rpc('rpc_delete_work_entry', { p_entry_id: editingEntry.id });
-  if (error) { msg('edit-msg', error.message, true); return; }
-  hide($('#edit-modal'));
-  editingEntry = null;
-  loadMyEntries();
-};
+  window.location.href = `https://login.microsoftonline.com/${MS_TENANT_ID}/oauth2/v2.0/authorize?${params}`;
+}
 
-// ---------- manual entry ----------
-$('#entry-type').onchange = () => {
-  $('#entry-project-wrap').classList.toggle('hidden', $('#entry-type').value !== 'project');
-};
-$('#btn-save-entry').onclick = async () => {
-  const type = $('#entry-type').value;
-  const projectId = type === 'project' ? $('#entry-project').value : null;
-  const start = $('#entry-start').value;
-  const end = $('#entry-end').value;
-  if (!start || !end) { msg('entry-msg', 'Start and end are required', true); return; }
-  if (type === 'project' && !projectId) { msg('entry-msg', 'Pick a project', true); return; }
-  const { error } = await sb.rpc('rpc_log_work_entry', {
-    p_project_id: projectId,
-    p_entry_type: type,
-    p_start_at: new Date(start).toISOString(),
-    p_end_at: new Date(end).toISOString(),
-    p_is_cutover: $('#entry-cutover').checked,
-    p_notes: $('#entry-notes').value || null,
-    p_actual_hours: $('#entry-actual').value ? parseFloat($('#entry-actual').value) : null
-  });
-  if (error) msg('entry-msg', error.message, true);
-  else { msg('entry-msg', 'Saved'); loadMyEntries(); }
-};
-
-// ---------- team week ----------
-$('#btn-week-prev').onclick = () => { weekStart.setDate(weekStart.getDate() - 7); loadWeekGrid(); };
-$('#btn-week-next').onclick = () => { weekStart.setDate(weekStart.getDate() + 7); loadWeekGrid(); };
-$('#btn-week-today').onclick = () => { weekStart = startOfWeek(new Date()); loadWeekGrid(); };
-
-async function loadWeekGrid() {
-  const days = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(weekStart); d.setDate(d.getDate() + i);
-    days.push(d);
-  }
-  const end = new Date(days[6]); end.setHours(23, 59, 59);
-  $('#week-label').textContent = `${fmtDate(days[0])} – ${fmtDate(days[6])}`;
+// ============================ TEAM WEEK ============================
+async function renderTeamWeek() {
+  const root = document.getElementById('view-team-week');
+  const today = new Date();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+  monday.setHours(0,0,0,0);
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 7);
 
   const { data: engineers } = await sb.from('engineers').select('*').eq('active', true).order('name');
   const { data: entries } = await sb.from('work_entries')
-    .select('*, project:projects(full_tag, customer_name), customer:customers!work_entries_customer_id_fkey(name)')
-    .gte('start_at', weekStart.toISOString())
-    .lte('start_at', end.toISOString());
+    .select('*, projects(project_code), customers:customer_id(name)')
+    .gte('start_at', monday.toISOString()).lt('start_at', sunday.toISOString());
 
-  const grid = $('#week-grid');
-  grid.innerHTML = '';
-  grid.appendChild(cell('eng-name', ''));
-  days.forEach(d => grid.appendChild(cell('day-header', `${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d.getDay() === 0 ? 6 : d.getDay() - 1]}<br>${fmtDate(d)}`)));
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday); d.setDate(monday.getDate() + i);
+    days.push(d);
+  }
 
-  (engineers || []).forEach(e => {
-    grid.appendChild(cell('eng-name', `${escapeHtml(e.name)}<br><span class="pill ${e.engineer_type.slice(0,4)}">${escapeHtml(e.engineer_type)}</span>`));
-    for (let i = 0; i < 7; i++) {
-      const dayStart = new Date(days[i]);
-      const dayEnd = new Date(days[i]); dayEnd.setHours(23, 59, 59);
-      const todays = (entries || []).filter(x =>
-        x.engineer_id === e.id &&
-        new Date(x.start_at) >= dayStart && new Date(x.start_at) <= dayEnd
-      );
-      const html = todays.map(x => renderWeekEntry(x)).join('');
-      grid.appendChild(cell('', html));
+  const cells = {};
+  (entries || []).forEach(e => {
+    const dayIdx = Math.floor((new Date(e.start_at) - monday) / (1000*60*60*24));
+    const key = `${e.engineer_id}|${dayIdx}`;
+    (cells[key] = cells[key] || []).push(e);
+  });
+
+  root.innerHTML = `
+    <div class="panel">
+      <h2>Team Week — ${fmtDate(monday.toISOString())} to ${fmtDate(new Date(sunday-1).toISOString())}</h2>
+      <div class="week-grid">
+        <div class="cell header-cell">Engineer</div>
+        ${days.map(d => `<div class="cell header-cell">${d.toLocaleDateString('en-SG', { weekday: 'short' })}<br>${fmtDate(d.toISOString())}</div>`).join('')}
+        ${(engineers || []).map(eng => `
+          <div class="cell name-cell">${escapeHtml(eng.name)}</div>
+          ${days.map((d, i) => {
+            const items = cells[`${eng.id}|${i}`] || [];
+            return `<div class="cell">${items.map(it => {
+              const cls = it.match_status === 'unmatched' ? 'unmatched' : (it.entry_type !== 'project' ? it.entry_type : '');
+              const customerLabel = it.customers?.name ? escapeHtml(it.customers.name) : (it.entry_type !== 'project' ? it.entry_type : 'unmatched');
+              const projLabel = it.projects?.project_code ? `<span class="badge">${escapeHtml(it.projects.project_code)}</span>` : '';
+              return `<div class="entry-bubble ${cls}">
+                <strong>${customerLabel}</strong>
+                <span class="small">${fmtTime(it.start_at)} · ${hoursBetween(it.start_at, it.end_at)}h</span>
+                ${projLabel}
+              </div>`;
+            }).join('')}</div>`;
+          }).join('')}
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+// ============================ MANAGE ============================
+async function renderManage() {
+  const root = document.getElementById('view-manage');
+
+  // Engineers
+  const { data: engineers } = await sb.from('engineers').select('*').order('name');
+
+  // Customers
+  const { data: customers } = await sb.from('customers').select('*').order('name');
+
+  // Projects with their SI/EU customer + assigned engineers
+  const { data: projects } = await sb.from('projects')
+    .select(`
+      id, project_code, name, status, full_tag, customer_id, end_user_id,
+      customer:customer_id(id, name),
+      end_user:end_user_id(id, name),
+      project_engineers(
+        engineer_id, is_lead,
+        engineers(id, name)
+      )
+    `).order('project_code');
+
+  root.innerHTML = `
+    <div class="panel">
+      <h2>Add engineer</h2>
+      <div class="row-form">
+        <input type="text" id="eng-name" placeholder="Name">
+        <input type="email" id="eng-email" placeholder="Email (@aznet.sg)">
+        <label>Type
+          <select id="eng-type">
+            <option value="professional">Professional</option>
+            <option value="resident">Resident</option>
+            <option value="remote">Remote</option>
+            <option value="management">Management</option>
+          </select>
+        </label>
+        <label><input type="checkbox" id="eng-clocking" checked> Clocking required</label>
+        <label><input type="checkbox" id="eng-mgr"> Is manager</label>
+        <label><input type="checkbox" id="eng-pricing"> Can see pricing</label>
+        <button id="eng-add">Add engineer</button>
+      </div>
+      <p style="color: var(--muted); font-size: 12px;">⚠️ After adding here, also create the auth user: Supabase → Authentication → Users → Add user → same email.</p>
+
+      <h3>Engineers</h3>
+      <table>
+        <thead><tr><th>Name</th><th>Email</th><th>Type</th><th>Clocking</th><th>Manager</th><th>Active</th></tr></thead>
+        <tbody>
+          ${(engineers || []).map(e => `
+            <tr>
+              <td>${escapeHtml(e.name)}</td>
+              <td>${escapeHtml(e.email)}</td>
+              <td><span class="pill pill-gray">${escapeHtml(e.engineer_type)}</span></td>
+              <td>${e.requires_clocking ? '✓' : '—'}</td>
+              <td>${e.is_manager ? '✓' : '—'}</td>
+              <td>${e.active ? '✓' : '—'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>Customers</h2>
+      <div class="row-form">
+        <input type="text" id="cust-name" placeholder="Name">
+        <input type="text" id="cust-domains" placeholder="email-domain.com (comma-separated for multiple)">
+        <button id="cust-add">Add customer</button>
+      </div>
+      <table>
+        <thead><tr><th>Name</th><th>Domains</th><th>Active</th><th></th></tr></thead>
+        <tbody>
+          ${(customers || []).map(c => `
+            <tr>
+              <td>${escapeHtml(c.name)}</td>
+              <td>${(c.email_domains || []).map(d => `<span class="badge">${escapeHtml(d)}</span>`).join(' ') || '—'}</td>
+              <td>${c.active ? '✓' : '—'}</td>
+              <td><button class="small secondary edit-domains-btn" data-id="${c.id}" data-domains="${(c.email_domains || []).join(',')}">Edit domains</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>Projects</h2>
+      <div class="row-form">
+        <input type="text" id="proj-code" placeholder="Code (without aznet- prefix, e.g. mandai-itpkg1)">
+        <select id="proj-customer"><option value="">SI customer (Invoiced)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
+        <select id="proj-enduser"><option value="">End user (Beneficiary)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
+        <input type="text" id="proj-name" placeholder="Name (e.g. Mandai IT Infra Pkg 1)">
+        <button id="proj-add">Create project</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Name</th>
+            <th>Customer (SI)</th>
+            <th>End User</th>
+            <th>Team</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(projects || []).map(p => {
+            const team = (p.project_engineers || []).slice().sort((a,b) => (b.is_lead?1:0) - (a.is_lead?1:0));
+            const teamHtml = team.length === 0 ? '<span style="color: var(--muted); font-size: 11px;">— unassigned —</span>' :
+              team.map(pe => pe.is_lead
+                ? `<span class="lead-marker">★ ${escapeHtml(pe.engineers?.name || '?')}</span>`
+                : escapeHtml(pe.engineers?.name || '?')
+              ).join(', ');
+            return `
+              <tr>
+                <td><span class="badge">${escapeHtml(p.full_tag || ('aznet-'+p.project_code))}</span></td>
+                <td>${escapeHtml(p.name || '—')}</td>
+                <td>${escapeHtml(p.customer?.name || '—')}</td>
+                <td>${escapeHtml(p.end_user?.name || '—')}</td>
+                <td>${teamHtml}</td>
+                <td><span class="pill pill-${p.status==='active'?'green':p.status==='completed'?'blue':'gray'}">${escapeHtml(p.status)}</span></td>
+                <td>
+                  <button class="small secondary manage-team-btn" data-id="${p.id}">Manage team</button>
+                  ${p.status === 'active'
+                    ? `<button class="small secondary set-status-btn" data-id="${p.id}" data-status="completed">Complete</button>
+                       <button class="small secondary set-status-btn" data-id="${p.id}" data-status="cancelled">Cancel</button>`
+                    : `<button class="small secondary set-status-btn" data-id="${p.id}" data-status="active">Reopen</button>`}
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  // Wire engineers/customers/projects (existing)
+  document.getElementById('eng-add').addEventListener('click', async () => {
+    const { error } = await sb.rpc('rpc_add_engineer', {
+      p_name: document.getElementById('eng-name').value,
+      p_email: document.getElementById('eng-email').value,
+      p_engineer_type: document.getElementById('eng-type').value,
+      p_requires_clocking: document.getElementById('eng-clocking').checked,
+      p_is_manager: document.getElementById('eng-mgr').checked,
+      p_can_see_pricing: document.getElementById('eng-pricing').checked
+    });
+    if (error) { toast(error.message, 'error'); return; }
+    toast('Engineer added. Remember to create their auth user in Supabase.', 'success');
+    await renderManage();
+  });
+
+  document.getElementById('cust-add').addEventListener('click', async () => {
+    const { error } = await sb.rpc('rpc_add_customer', {
+      p_name: document.getElementById('cust-name').value,
+      p_email_domains: document.getElementById('cust-domains').value.split(',').map(s => s.trim()).filter(Boolean)
+    });
+    if (error) { toast(error.message, 'error'); return; }
+    toast('Customer added.', 'success');
+    await renderManage();
+  });
+
+  document.querySelectorAll('.edit-domains-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const newDomains = prompt('Enter comma-separated domains:', btn.dataset.domains);
+      if (newDomains === null) return;
+      const { error } = await sb.rpc('rpc_update_customer', {
+        p_customer_id: btn.dataset.id,
+        p_email_domains: newDomains.split(',').map(s => s.trim()).filter(Boolean)
+      });
+      if (error) { toast(error.message, 'error'); return; }
+      toast('Updated.', 'success');
+      await renderManage();
+    });
+  });
+
+  document.getElementById('proj-add').addEventListener('click', async () => {
+    const { error } = await sb.rpc('rpc_create_project', {
+      p_project_code: document.getElementById('proj-code').value,
+      p_customer_id: document.getElementById('proj-customer').value || null,
+      p_end_user_id: document.getElementById('proj-enduser').value || null,
+      p_name: document.getElementById('proj-name').value
+    });
+    if (error) { toast(error.message, 'error'); return; }
+    toast('Project created.', 'success');
+    await renderManage();
+  });
+
+  document.querySelectorAll('.set-status-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const { error } = await sb.rpc('rpc_set_project_status', {
+        p_project_id: btn.dataset.id,
+        p_status: btn.dataset.status
+      });
+      if (error) { toast(error.message, 'error'); return; }
+      toast('Status updated.', 'success');
+      await renderManage();
+    });
+  });
+
+  // Manage Team modal
+  document.querySelectorAll('.manage-team-btn').forEach(btn => {
+    btn.addEventListener('click', () => openManageTeamModal(btn.dataset.id));
+  });
+}
+
+// ============================ MANAGE TEAM MODAL ============================
+async function openManageTeamModal(projectId) {
+  if (!isManager) { toast('Only managers can change project teams.', 'error'); return; }
+
+  const { data: project } = await sb.from('projects')
+    .select('id, project_code, name, full_tag').eq('id', projectId).maybeSingle();
+  const { data: engineers } = await sb.from('engineers').select('id, name, email, active').eq('active', true).order('name');
+  const { data: assignments } = await sb.from('project_engineers')
+    .select('engineer_id, is_lead').eq('project_id', projectId);
+
+  const assignedSet = new Set((assignments || []).map(a => a.engineer_id));
+  const leadId = (assignments || []).find(a => a.is_lead)?.engineer_id || null;
+
+  const c = document.getElementById('modal-container');
+  c.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal" style="min-width: 540px;">
+        <h3>Manage team — ${escapeHtml(project?.full_tag || project?.project_code || '')}</h3>
+        <div style="color: var(--muted); font-size: 12px; margin-bottom: 16px;">
+          ${escapeHtml(project?.name || '')}<br>
+          Tick to assign. Use the ★ column to mark exactly one engineer as the project lead.
+        </div>
+        <table class="team-mgmt-table">
+          <thead>
+            <tr>
+              <th style="width: 40px;">On</th>
+              <th style="width: 40px;" title="Lead">★</th>
+              <th>Engineer</th>
+              <th>Email</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(engineers || []).map(e => `
+              <tr>
+                <td><input type="checkbox" class="assign-cb" data-eng="${e.id}" ${assignedSet.has(e.id) ? 'checked' : ''}></td>
+                <td><input type="radio" name="lead-radio" class="lead-rb" data-eng="${e.id}" ${leadId === e.id ? 'checked' : ''}></td>
+                <td>${escapeHtml(e.name)}</td>
+                <td><span style="color: var(--muted); font-size: 12px;">${escapeHtml(e.email)}</span></td>
+              </tr>
+            `).join('')}
+            <tr>
+              <td colspan="2"><input type="radio" name="lead-radio" class="lead-rb" data-eng="" ${leadId === null ? 'checked' : ''}></td>
+              <td colspan="2" style="color: var(--muted); font-size: 12px;">— no lead —</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="modal-actions">
+          <button id="team-cancel" class="secondary">Cancel</button>
+          <button id="team-save">Save</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Lead can only be ticked if their assignment checkbox is also ticked
+  c.querySelectorAll('.lead-rb').forEach(rb => {
+    rb.addEventListener('change', () => {
+      const engId = rb.dataset.eng;
+      if (!engId) return; // "no lead" option
+      const cb = c.querySelector(`.assign-cb[data-eng="${engId}"]`);
+      if (cb && !cb.checked) cb.checked = true;
+    });
+  });
+
+  // If you uncheck someone who's the current lead, also uncheck the lead radio
+  c.querySelectorAll('.assign-cb').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (!cb.checked) {
+        const rb = c.querySelector(`.lead-rb[data-eng="${cb.dataset.eng}"]`);
+        if (rb && rb.checked) {
+          rb.checked = false;
+          c.querySelector('.lead-rb[data-eng=""]').checked = true;
+        }
+      }
+    });
+  });
+
+  document.getElementById('team-cancel').addEventListener('click', () => c.innerHTML = '');
+  document.getElementById('team-save').addEventListener('click', async () => {
+    // Determine target state from UI
+    const targetAssigned = new Set();
+    c.querySelectorAll('.assign-cb:checked').forEach(cb => targetAssigned.add(cb.dataset.eng));
+    const targetLead = c.querySelector('.lead-rb:checked')?.dataset.eng || '';
+
+    const errors = [];
+
+    // Unassign anyone removed
+    for (const a of (assignments || [])) {
+      if (!targetAssigned.has(a.engineer_id)) {
+        const { error } = await sb.rpc('rpc_unassign_engineer', {
+          p_project_id: projectId, p_engineer_id: a.engineer_id
+        });
+        if (error) errors.push(error.message);
+      }
     }
-  });
-}
-function renderWeekEntry(x) {
-  const cls = x.match_status === 'unmatched'
-    ? 'unmatched'
-    : (x.entry_type === 'project' ? '' : x.entry_type);
 
-  const customerName = x.project?.customer_name || x.customer?.name;
-  const projectTag = x.project?.full_tag;
-  const startT = new Date(x.start_at).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' });
-  const endT = new Date(x.end_at).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' });
-  const tooltipLines = [
-    x.raw_title || x.notes || `(${x.entry_type})`,
-    `${startT} – ${endT}`,
-    customerName ? `Customer: ${customerName}` : null,
-    projectTag ? `Project: ${projectTag}` : null,
-    x.match_status === 'unmatched' ? 'UNMATCHED — needs review' : null
-  ].filter(Boolean).join('\n');
+    // Assign anyone added (without lead flag for now)
+    for (const engId of targetAssigned) {
+      const wasAssigned = assignedSet.has(engId);
+      if (!wasAssigned) {
+        const { error } = await sb.rpc('rpc_assign_engineer', {
+          p_project_id: projectId, p_engineer_id: engId, p_is_lead: false
+        });
+        if (error) errors.push(error.message);
+      }
+    }
 
-  let primary, secondary;
-  if (x.entry_type !== 'project') {
-    // leave/admin/training/standby — just show the type
-    primary = x.entry_type.toUpperCase();
-    secondary = startT;
-  } else if (customerName) {
-    primary = truncate(customerName, 18);
-    secondary = projectTag ? truncate(projectTag, 22) : (x.match_status === 'unmatched' ? 'unmatched' : '');
-  } else {
-    primary = truncate(x.raw_title || 'event', 18);
-    secondary = 'unmatched';
-  }
+    // Set lead exactly once at the end (handles all transitions)
+    if (targetLead) {
+      const { error } = await sb.rpc('rpc_set_lead_engineer', {
+        p_project_id: projectId, p_engineer_id: targetLead
+      });
+      if (error) errors.push(error.message);
+    } else if (leadId) {
+      // User wants to clear the lead — easiest path: unassign-then-reassign the old lead without lead flag
+      // But they may want to keep the engineer assigned. Use a direct SQL via a small RPC instead — for now
+      // just call rpc_assign_engineer (idempotent upsert) with p_is_lead=false on the old lead
+      const { error } = await sb.rpc('rpc_assign_engineer', {
+        p_project_id: projectId, p_engineer_id: leadId, p_is_lead: false
+      });
+      if (error) errors.push(error.message);
+    }
 
-  return `<div class="entry ${cls}" title="${escapeHtml(tooltipLines)}">
-    <div class="e-customer">${escapeHtml(primary)}</div>
-    ${secondary ? `<div class="e-project">${escapeHtml(secondary)}</div>` : ''}
-  </div>`;
-}
-function cell(cls, html) {
-  const d = document.createElement('div');
-  if (cls) d.className = cls;
-  d.innerHTML = html;
-  return d;
-}
-
-// ---------- manage: engineers ----------
-$('#btn-add-eng').onclick = async () => {
-  const { error } = await sb.rpc('rpc_add_engineer', {
-    p_name: $('#new-eng-name').value,
-    p_email: $('#new-eng-email').value.toLowerCase(),
-    p_engineer_type: $('#new-eng-type').value,
-    p_clocking_required: $('#new-eng-clocking').checked,
-    p_is_manager: $('#new-eng-manager').checked
-  });
-  if (error) { msg('add-eng-msg', error.message, true); return; }
-  if ($('#new-eng-pricing').checked) {
-    await sb.from('engineers').update({ can_see_pricing: true }).eq('email', $('#new-eng-email').value.toLowerCase());
-  }
-  msg('add-eng-msg', 'Engineer added. Remember to create their auth user in Supabase.');
-  ['new-eng-name','new-eng-email'].forEach(id => $('#' + id).value = '');
-  loadEngineers();
-};
-async function loadEngineers() {
-  const { data } = await sb.from('engineers').select('*').order('name');
-  $('#engineers-table tbody').innerHTML = (data || []).map(e => `
-    <tr>
-      <td>${escapeHtml(e.name)}</td>
-      <td>${escapeHtml(e.email)}</td>
-      <td><span class="pill ${e.engineer_type.slice(0,4)}">${escapeHtml(e.engineer_type)}</span></td>
-      <td>${e.clocking_required ? '✓' : '—'}</td>
-      <td>${e.is_manager ? '✓' : '—'}</td>
-      <td>${e.active ? '✓' : '—'}</td>
-    </tr>
-  `).join('');
-}
-
-// ---------- manage: customers ----------
-$('#btn-add-cust').onclick = async () => {
-  const domains = $('#new-cust-domains').value.split(',').map(s => s.trim()).filter(Boolean);
-  const { error } = await sb.rpc('rpc_add_customer', {
-    p_name: $('#new-cust-name').value,
-    p_email_domains: domains,
-    p_notes: $('#new-cust-notes').value || null
-  });
-  if (error) { msg('add-cust-msg', error.message, true); return; }
-  msg('add-cust-msg', 'Customer added');
-  ['new-cust-name','new-cust-domains','new-cust-notes'].forEach(id => $('#' + id).value = '');
-  await loadCustomersRef();
-  loadCustomersTable();
-  populateCustomerDropdowns();
-};
-async function loadCustomersTable() {
-  $('#customers-table tbody').innerHTML = allCustomers.map(c => `
-    <tr>
-      <td>${escapeHtml(c.name)}</td>
-      <td><code style="font-size: 11px;">${c.email_domains?.length ? escapeHtml(c.email_domains.join(', ')) : '<span class="muted">none</span>'}</code></td>
-      <td>${c.active ? '✓' : '—'}</td>
-      <td><button class="btn btn-xs" data-cust-id="${c.id}">Edit domains</button></td>
-    </tr>
-  `).join('');
-  $$('#customers-table button[data-cust-id]').forEach(btn => {
-    btn.onclick = () => editCustomerDomains(btn.dataset.custId);
-  });
-}
-async function editCustomerDomains(customerId) {
-  const c = allCustomers.find(x => x.id === customerId);
-  if (!c) return;
-  const input = prompt(`Email domains for ${c.name} (comma-separated):`, (c.email_domains || []).join(', '));
-  if (input === null) return;
-  const domains = input.split(',').map(s => s.trim()).filter(Boolean);
-  const { error } = await sb.rpc('rpc_update_customer', {
-    p_customer_id: customerId, p_email_domains: domains, p_notes: c.notes || null
-  });
-  if (error) { alert(error.message); return; }
-  await loadCustomersRef();
-  loadCustomersTable();
-}
-
-// ---------- manage: projects ----------
-function populateCustomerDropdowns() {
-  const activeList = allCustomers.filter(c => c.active);
-  const siOpts = '<option value="">-- pick SI / customer --</option>' +
-    activeList.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-  const euOpts = '<option value="">(same as SI)</option>' +
-    activeList.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-  $('#new-proj-customer').innerHTML = siOpts;
-  $('#new-proj-enduser').innerHTML = euOpts;
-}
-$('#new-proj-code').addEventListener('input', e => {
-  $('#proj-preview').textContent = 'aznet-' + (e.target.value || '').toLowerCase();
-});
-$('#btn-add-proj').onclick = async () => {
-  const customerId = $('#new-proj-customer').value;
-  const endUserId = $('#new-proj-enduser').value || null;
-  if (!customerId) { msg('add-proj-msg', 'Pick an SI / customer', true); return; }
-  const { error } = await sb.rpc('rpc_create_project', {
-    p_project_code: $('#new-proj-code').value.toLowerCase(),
-    p_customer_id: customerId,
-    p_project_name: $('#new-proj-name').value,
-    p_quoted_office_mandays: parseFloat($('#new-proj-office').value || 0),
-    p_quoted_cutover_mandays: parseFloat($('#new-proj-cutover').value || 0),
-    p_price_ps: $('#new-proj-price').value ? parseFloat($('#new-proj-price').value) : null,
-    p_end_user_id: endUserId
-  });
-  if (error) { msg('add-proj-msg', error.message, true); return; }
-  msg('add-proj-msg', 'Project created');
-  ['new-proj-code','new-proj-name','new-proj-price'].forEach(id => $('#' + id).value = '');
-  $('#new-proj-customer').value = '';
-  $('#new-proj-enduser').value = '';
-  await loadProjectsRef();
-  loadProjectsTable();
-};
-$('#project-filter').onchange = () => loadProjectsTable();
-
-async function loadProjectsTable() {
-  const filter = $('#project-filter').value;
-  let q = sb.from('projects').select(`
-      *,
-      end_user:customers!projects_end_user_id_fkey(name)
-    `).order('created_at', { ascending: false });
-  if (filter !== 'all') q = q.eq('status', filter);
-  const { data } = await q;
-  const showPrice = me?.can_see_pricing;
-  $('#projects-table tbody').innerHTML = (data || []).map(p => {
-    const euName = p.end_user?.name || p.customer_name;
-    const euSameAsSI = p.end_user_id === p.customer_id;
-    return `
-      <tr>
-        <td><strong>${escapeHtml(p.full_tag)}</strong></td>
-        <td>${escapeHtml(p.customer_name)}</td>
-        <td>${escapeHtml(euName)}${euSameAsSI ? ' <span class="muted">(same)</span>' : ''}</td>
-        <td>${escapeHtml(p.project_name)}</td>
-        <td>${p.quoted_office_mandays}+${p.quoted_cutover_mandays}c</td>
-        ${showPrice ? `<td>${p.price_ps ? 'S$' + Number(p.price_ps).toLocaleString() : '—'}</td>` : ''}
-        <td><span class="pill status-${p.status}">${p.status}</span></td>
-        <td><div class="row-actions">${buildProjectActions(p)}</div></td>
-      </tr>
-    `;
-  }).join('') || `<tr><td colspan="8" class="muted">No projects.</td></tr>`;
-
-  $$('#projects-table button[data-pid]').forEach(btn => {
-    btn.onclick = () => setProjectStatus(btn.dataset.pid, btn.dataset.newStatus, btn.dataset.label);
+    if (errors.length) { toast(errors.join('; '), 'error'); return; }
+    toast('Team updated.', 'success');
+    c.innerHTML = '';
+    await renderManage();
   });
 }
 
-function buildProjectActions(p) {
-  if (p.status === 'active') {
-    return `
-      <button class="btn btn-xs btn-good" data-pid="${p.id}" data-new-status="completed" data-label="complete">Complete</button>
-      <button class="btn btn-xs btn-danger" data-pid="${p.id}" data-new-status="cancelled" data-label="cancel">Cancel</button>
-    `;
-  } else {
-    return `<button class="btn btn-xs" data-pid="${p.id}" data-new-status="active" data-label="reopen">Reopen</button>`;
-  }
-}
-async function setProjectStatus(projectId, newStatus, label) {
-  if (label !== 'reopen') {
-    if (!confirm(`${label} this project? Existing time entries remain intact.`)) return;
-  }
-  const { error } = await sb.rpc('rpc_set_project_status', {
-    p_project_id: projectId, p_new_status: newStatus
-  });
-  if (error) { alert('Error: ' + error.message); return; }
-  await loadProjectsRef();
-  loadProjectsTable();
-}
-
-initAuth();
+// ============================ INIT ============================
+sb.auth.onAuthStateChange(() => checkSession());
+checkSession();
 </script>
 </body>
 </html>
