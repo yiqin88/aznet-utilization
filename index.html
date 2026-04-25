@@ -53,22 +53,28 @@
     font-size: 13px; font-family: inherit;
   }
   input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+  input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
   th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .grid-week { display: grid; grid-template-columns: 140px repeat(7, 1fr); gap: 2px; }
+  .grid-week { display: grid; grid-template-columns: 160px repeat(7, 1fr); gap: 2px; }
   .grid-week > div {
-    background: var(--panel2); padding: 6px 8px; min-height: 40px; font-size: 12px;
+    background: var(--panel2); padding: 6px 8px; min-height: 50px; font-size: 11px;
   }
   .grid-week .eng-name { font-weight: 600; background: var(--panel); }
   .grid-week .day-header { background: var(--panel); color: var(--muted); font-size: 11px; text-align: center; }
   .grid-week .entry {
     background: #1e3a5f; border-left: 3px solid var(--accent);
-    padding: 4px 6px; margin-bottom: 2px; border-radius: 3px; font-size: 11px;
+    padding: 4px 6px; margin-bottom: 3px; border-radius: 3px;
+    cursor: default;
   }
+  .grid-week .entry .e-customer { font-weight: 600; font-size: 11px; }
+  .grid-week .entry .e-project { font-size: 10px; color: var(--muted); font-family: ui-monospace, monospace; }
+  .grid-week .entry .e-raw { font-size: 10px; color: var(--muted); font-style: italic; }
   .grid-week .entry.leave { background: #3f1c1c; border-left-color: var(--bad); }
   .grid-week .entry.admin { background: #3d2a0f; border-left-color: var(--warn); }
   .grid-week .entry.training { background: #1e3a2e; border-left-color: var(--good); }
+  .grid-week .entry.standby { background: #2e2a3d; border-left-color: #a78bfa; }
   .grid-week .entry.unmatched { background: #3d1e3a; border-left-color: #ec4899; }
   .pill {
     display: inline-block; padding: 2px 8px; border-radius: 10px;
@@ -100,10 +106,8 @@
   .filter-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
   .calendar-status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .event-title { font-weight: 500; }
-  .event-sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
   .entry-row.unmatched-row { background: rgba(236, 72, 153, 0.05); }
 
-  /* Modal */
   .modal-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
     display: flex; align-items: center; justify-content: center;
@@ -111,7 +115,7 @@
   }
   .modal {
     background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    padding: 24px; max-width: 560px; width: 100%; max-height: 90vh; overflow: auto;
+    padding: 24px; max-width: 600px; width: 100%; max-height: 90vh; overflow: auto;
   }
   .modal h3 { margin-top: 0; color: var(--accent); font-size: 16px; }
   .modal-footer {
@@ -120,6 +124,7 @@
     flex-wrap: wrap;
   }
   .modal-footer .right { display: flex; gap: 8px; margin-left: auto; }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -157,7 +162,7 @@
       <span class="muted">Loading…</span>
     </div>
     <p class="muted" style="margin-top: 10px;">
-      Events starting with <strong>aznet-</strong> are synced directly. Invites from known customer domains are auto-matched when unambiguous, otherwise flagged for review.
+      Events starting with <strong>aznet-</strong> are synced directly. Invites from known customer/partner email domains are auto-matched when unambiguous, otherwise flagged for review.
     </p>
   </div>
 
@@ -215,7 +220,7 @@
       <thead><tr>
         <th>When</th>
         <th>Event</th>
-        <th>Customer</th>
+        <th>Customer (SI)</th>
         <th>Project</th>
         <th>Hours</th>
         <th>Source</th>
@@ -282,6 +287,7 @@
     </div>
     <button class="btn-primary" id="btn-add-cust">Add customer</button>
     <div id="add-cust-msg"></div>
+    <p class="hint">Used for both System Integrators (who send invites/get invoiced) and End Users (beneficiaries). A party can be either or both.</p>
 
     <h2 style="margin-top: 24px;">Customers</h2>
     <table id="customers-table">
@@ -298,8 +304,12 @@
         <input id="new-proj-code" placeholder="e.g. ptc-arubacx" />
       </div>
       <div>
-        <label>Customer</label>
+        <label>Customer / SI <span class="hint">(who sends invites & gets invoiced)</span></label>
         <select id="new-proj-customer"></select>
+      </div>
+      <div>
+        <label>End User <span class="hint">(optional — leave blank if same as SI)</span></label>
+        <select id="new-proj-enduser"></select>
       </div>
       <div><label>Project name</label><input id="new-proj-name" /></div>
       <div><label>Office man-days</label><input id="new-proj-office" type="number" step="0.5" value="0" /></div>
@@ -325,7 +335,7 @@
       </div>
     </div>
     <table id="projects-table">
-      <thead><tr><th>Code</th><th>Customer</th><th>Name</th><th>Quoted MD</th><th class="can-see-pricing hidden">Price</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Code</th><th>SI</th><th>EU</th><th>Name</th><th>Quoted MD</th><th class="can-see-pricing hidden">Price</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -350,6 +360,12 @@
       <div id="edit-project-wrap">
         <label>Project</label>
         <select id="edit-project"></select>
+        <div class="hint">Setting a project overrides customer to its SI.</div>
+      </div>
+      <div id="edit-customer-wrap">
+        <label>Customer (SI)</label>
+        <select id="edit-customer"></select>
+        <div class="hint">Use this when no project applies but you want to attribute the time to a customer.</div>
       </div>
       <div>
         <label><input type="checkbox" id="edit-cutover" /> Cutover (after-hours)</label>
@@ -376,7 +392,7 @@ const SUPABASE_URL = 'https://tixgkvsyifuqanupmcic.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpeGdrdnN5aWZ1cWFudXBtY2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMjQyMDEsImV4cCI6MjA5MjYwMDIwMX0.lnXmf4bV6orj64EVpuGS5AgmvpVhM4Amgcvhj39fbtU';
 
 const MS_TENANT_ID = 'aznet.sg';
-const MS_CLIENT_ID = '390064d5-c524-4166-ae2f-faeef82da5e5';  // ⚠️ REPLACE WITH YOUR REAL VALUE - see note at bottom
+const MS_CLIENT_ID = 'PUT_YOUR_CLIENT_ID_HERE';  // ⚠️ REPLACE
 const MS_SCOPES = 'openid profile email offline_access Calendars.Read User.Read';
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -387,7 +403,6 @@ let allCustomers = [];
 let weekStart = startOfWeek(new Date());
 let editingEntry = null;
 
-// ---------- helpers ----------
 const $ = sel => document.querySelector(sel);
 const $$ = sel => document.querySelectorAll(sel);
 const show = el => el.classList.remove('hidden');
@@ -411,7 +426,6 @@ function hours(a, b) { return ((new Date(b) - new Date(a)) / 36e5); }
 function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function truncate(s, n) { s = String(s ?? ''); return s.length > n ? s.slice(0, n-1) + '…' : s; }
 
-// ---------- auth ----------
 async function initAuth() {
   const { data: { session } } = await sb.auth.getSession();
   if (session) await onSignedIn(session);
@@ -452,17 +466,14 @@ $('#btn-login').onclick = async () => {
 };
 $('#btn-signout').onclick = () => sb.auth.signOut();
 
-// ---------- nav ----------
-$$('#nav button[data-view]').forEach(btn => {
-  btn.onclick = () => switchView(btn.dataset.view);
-});
+$$('#nav button[data-view]').forEach(btn => { btn.onclick = () => switchView(btn.dataset.view); });
 function switchView(v) {
   $$('#nav button[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === v));
   ['schedule','week','manage'].forEach(x => hide($('#view-' + x)));
   show($('#view-' + v));
   if (v === 'schedule') { loadMyEntries(); loadCalendarStatus(); }
   if (v === 'week') loadWeekGrid();
-  if (v === 'manage') { loadEngineers(); loadCustomersTable(); loadProjectsTable(); populateCustomerDropdown(); }
+  if (v === 'manage') { loadEngineers(); loadCustomersTable(); loadProjectsTable(); populateCustomerDropdowns(); }
 }
 
 // ---------- calendar connection ----------
@@ -523,7 +534,7 @@ function startOAuthFlow() {
 
 // ---------- reference data ----------
 async function loadProjectsRef() {
-  const { data } = await sb.from('projects').select('id, project_code, full_tag, customer_id, customer_name, project_name, status');
+  const { data } = await sb.from('projects').select('id, project_code, full_tag, customer_id, end_user_id, customer_name, project_name, status');
   allProjects = data || [];
   refreshProjectSelects();
 }
@@ -543,7 +554,7 @@ $('#my-entries-filter').onchange = () => loadMyEntries();
 async function loadMyEntries() {
   const filter = $('#my-entries-filter').value;
   let q = sb.from('work_entries')
-    .select('*, project:projects(id, full_tag, customer_name, project_name, customer_id)')
+    .select('*, project:projects(id, full_tag, customer_name, project_name, customer_id, end_user_id), customer:customers!work_entries_customer_id_fkey(id, name)')
     .eq('engineer_id', me.id)
     .order('start_at', { ascending: false })
     .limit(50);
@@ -553,7 +564,7 @@ async function loadMyEntries() {
   const { data, error } = await q;
   const tbody = $('#my-entries-table tbody');
   if (error) { tbody.innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`; return; }
-  tbody.innerHTML = (data || []).map(e => renderEntryRow(e)).join('') || '<tr><td colspan="8" class="muted">No entries.</td></tr>';
+  tbody.innerHTML = (data || []).map(renderEntryRow).join('') || '<tr><td colspan="8" class="muted">No entries.</td></tr>';
 
   $$('#my-entries-table button[data-entry-id]').forEach(btn => {
     btn.onclick = () => openEditModal(btn.dataset.entryId);
@@ -563,7 +574,8 @@ async function loadMyEntries() {
 function renderEntryRow(e) {
   const h = e.actual_hours ?? hours(e.start_at, e.end_at).toFixed(2);
   const eventLabel = e.raw_title || e.notes || `(${e.entry_type})`;
-  const customerLabel = e.project?.customer_name || '—';
+  // Customer: prefer project's customer name, else directly-linked customer, else dash
+  const customerLabel = e.project?.customer_name || e.customer?.name || '—';
   const projectLabel = e.project?.full_tag || (e.entry_type !== 'project' ? `(${e.entry_type})` : '—');
   const statusPill = `<span class="pill ${e.match_status}">${e.match_status}</span>`;
   const cutoverPill = e.is_cutover ? ' <span class="pill cutover">cutover</span>' : '';
@@ -590,28 +602,51 @@ function openEditModal(entryId) {
       <strong>${escapeHtml(data.raw_title || data.notes || '(no title)')}</strong><br>
       ${fmtDT(data.start_at)} – ${fmtDT(data.end_at)}
     `;
+    populateEditCustomerDropdown();
     $('#edit-type').value = data.entry_type;
     $('#edit-project').value = data.project_id || '';
+    $('#edit-customer').value = data.customer_id || '';
     $('#edit-cutover').checked = data.is_cutover;
-    $('#edit-project-wrap').classList.toggle('hidden', data.entry_type !== 'project');
+    updateEditModalLock();
     $('#edit-msg').innerHTML = '';
     show($('#edit-modal'));
   });
 }
-$('#edit-type').onchange = () => {
-  $('#edit-project-wrap').classList.toggle('hidden', $('#edit-type').value !== 'project');
-};
+function populateEditCustomerDropdown() {
+  const opts = ['<option value="">(none)</option>'].concat(
+    allCustomers.filter(c => c.active).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
+  ).join('');
+  $('#edit-customer').innerHTML = opts;
+}
+function updateEditModalLock() {
+  const type = $('#edit-type').value;
+  const projectId = $('#edit-project').value;
+  const isProject = type === 'project';
+  $('#edit-project-wrap').classList.toggle('hidden', !isProject);
+  // If project selected, customer field becomes locked and auto-fills to project's customer
+  if (isProject && projectId) {
+    const proj = allProjects.find(p => p.id === projectId);
+    if (proj) $('#edit-customer').value = proj.customer_id || '';
+    $('#edit-customer').disabled = true;
+  } else {
+    $('#edit-customer').disabled = false;
+  }
+}
+$('#edit-type').onchange = updateEditModalLock;
+$('#edit-project').onchange = updateEditModalLock;
 $('#edit-cancel').onclick = () => { hide($('#edit-modal')); editingEntry = null; };
 $('#edit-save').onclick = async () => {
   if (!editingEntry) return;
   const type = $('#edit-type').value;
   const projectId = type === 'project' ? $('#edit-project').value || null : null;
+  const customerId = $('#edit-customer').value || null;
   if (type === 'project' && !projectId) { msg('edit-msg', 'Pick a project', true); return; }
   const { error } = await sb.rpc('rpc_reassign_work_entry', {
     p_entry_id: editingEntry.id,
     p_entry_type: type,
     p_project_id: projectId,
-    p_is_cutover: $('#edit-cutover').checked
+    p_is_cutover: $('#edit-cutover').checked,
+    p_customer_id: customerId
   });
   if (error) { msg('edit-msg', error.message, true); return; }
   hide($('#edit-modal'));
@@ -620,7 +655,7 @@ $('#edit-save').onclick = async () => {
 };
 $('#edit-delete').onclick = async () => {
   if (!editingEntry) return;
-  if (!confirm('Delete this entry? This cannot be undone (but the original Outlook event is not affected).')) return;
+  if (!confirm('Delete this entry? The original Outlook event is not affected.')) return;
   const { error } = await sb.rpc('rpc_delete_work_entry', { p_entry_id: editingEntry.id });
   if (error) { msg('edit-msg', error.message, true); return; }
   hide($('#edit-modal'));
@@ -628,7 +663,7 @@ $('#edit-delete').onclick = async () => {
   loadMyEntries();
 };
 
-// ---------- manual entry form ----------
+// ---------- manual entry ----------
 $('#entry-type').onchange = () => {
   $('#entry-project-wrap').classList.toggle('hidden', $('#entry-type').value !== 'project');
 };
@@ -668,7 +703,7 @@ async function loadWeekGrid() {
 
   const { data: engineers } = await sb.from('engineers').select('*').eq('active', true).order('name');
   const { data: entries } = await sb.from('work_entries')
-    .select('*, project:projects(full_tag, customer_name)')
+    .select('*, project:projects(full_tag, customer_name), customer:customers!work_entries_customer_id_fkey(name)')
     .gte('start_at', weekStart.toISOString())
     .lte('start_at', end.toISOString());
 
@@ -686,15 +721,45 @@ async function loadWeekGrid() {
         x.engineer_id === e.id &&
         new Date(x.start_at) >= dayStart && new Date(x.start_at) <= dayEnd
       );
-      const html = todays.map(x => {
-        const tag = x.project?.full_tag || x.entry_type;
-        const cls = x.match_status === 'unmatched' ? 'unmatched' : x.entry_type;
-        const tooltip = `${x.raw_title || x.notes || tag}\n${new Date(x.start_at).toLocaleTimeString()} – ${new Date(x.end_at).toLocaleTimeString()}`;
-        return `<div class="entry ${cls}" title="${escapeHtml(tooltip)}">${escapeHtml(tag)}</div>`;
-      }).join('');
+      const html = todays.map(x => renderWeekEntry(x)).join('');
       grid.appendChild(cell('', html));
     }
   });
+}
+function renderWeekEntry(x) {
+  const cls = x.match_status === 'unmatched'
+    ? 'unmatched'
+    : (x.entry_type === 'project' ? '' : x.entry_type);
+
+  const customerName = x.project?.customer_name || x.customer?.name;
+  const projectTag = x.project?.full_tag;
+  const startT = new Date(x.start_at).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' });
+  const endT = new Date(x.end_at).toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' });
+  const tooltipLines = [
+    x.raw_title || x.notes || `(${x.entry_type})`,
+    `${startT} – ${endT}`,
+    customerName ? `Customer: ${customerName}` : null,
+    projectTag ? `Project: ${projectTag}` : null,
+    x.match_status === 'unmatched' ? 'UNMATCHED — needs review' : null
+  ].filter(Boolean).join('\n');
+
+  let primary, secondary;
+  if (x.entry_type !== 'project') {
+    // leave/admin/training/standby — just show the type
+    primary = x.entry_type.toUpperCase();
+    secondary = startT;
+  } else if (customerName) {
+    primary = truncate(customerName, 18);
+    secondary = projectTag ? truncate(projectTag, 22) : (x.match_status === 'unmatched' ? 'unmatched' : '');
+  } else {
+    primary = truncate(x.raw_title || 'event', 18);
+    secondary = 'unmatched';
+  }
+
+  return `<div class="entry ${cls}" title="${escapeHtml(tooltipLines)}">
+    <div class="e-customer">${escapeHtml(primary)}</div>
+    ${secondary ? `<div class="e-project">${escapeHtml(secondary)}</div>` : ''}
+  </div>`;
 }
 function cell(cls, html) {
   const d = document.createElement('div');
@@ -747,7 +812,7 @@ $('#btn-add-cust').onclick = async () => {
   ['new-cust-name','new-cust-domains','new-cust-notes'].forEach(id => $('#' + id).value = '');
   await loadCustomersRef();
   loadCustomersTable();
-  populateCustomerDropdown();
+  populateCustomerDropdowns();
 };
 async function loadCustomersTable() {
   $('#customers-table tbody').innerHTML = allCustomers.map(c => `
@@ -769,9 +834,7 @@ async function editCustomerDomains(customerId) {
   if (input === null) return;
   const domains = input.split(',').map(s => s.trim()).filter(Boolean);
   const { error } = await sb.rpc('rpc_update_customer', {
-    p_customer_id: customerId,
-    p_email_domains: domains,
-    p_notes: c.notes || null
+    p_customer_id: customerId, p_email_domains: domains, p_notes: c.notes || null
   });
   if (error) { alert(error.message); return; }
   await loadCustomersRef();
@@ -779,28 +842,36 @@ async function editCustomerDomains(customerId) {
 }
 
 // ---------- manage: projects ----------
-function populateCustomerDropdown() {
-  const opts = allCustomers.filter(c => c.active).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-  $('#new-proj-customer').innerHTML = '<option value="">-- pick a customer --</option>' + opts;
+function populateCustomerDropdowns() {
+  const activeList = allCustomers.filter(c => c.active);
+  const siOpts = '<option value="">-- pick SI / customer --</option>' +
+    activeList.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  const euOpts = '<option value="">(same as SI)</option>' +
+    activeList.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  $('#new-proj-customer').innerHTML = siOpts;
+  $('#new-proj-enduser').innerHTML = euOpts;
 }
 $('#new-proj-code').addEventListener('input', e => {
   $('#proj-preview').textContent = 'aznet-' + (e.target.value || '').toLowerCase();
 });
 $('#btn-add-proj').onclick = async () => {
   const customerId = $('#new-proj-customer').value;
-  if (!customerId) { msg('add-proj-msg', 'Pick a customer', true); return; }
+  const endUserId = $('#new-proj-enduser').value || null;
+  if (!customerId) { msg('add-proj-msg', 'Pick an SI / customer', true); return; }
   const { error } = await sb.rpc('rpc_create_project', {
     p_project_code: $('#new-proj-code').value.toLowerCase(),
     p_customer_id: customerId,
     p_project_name: $('#new-proj-name').value,
     p_quoted_office_mandays: parseFloat($('#new-proj-office').value || 0),
     p_quoted_cutover_mandays: parseFloat($('#new-proj-cutover').value || 0),
-    p_price_ps: $('#new-proj-price').value ? parseFloat($('#new-proj-price').value) : null
+    p_price_ps: $('#new-proj-price').value ? parseFloat($('#new-proj-price').value) : null,
+    p_end_user_id: endUserId
   });
   if (error) { msg('add-proj-msg', error.message, true); return; }
   msg('add-proj-msg', 'Project created');
   ['new-proj-code','new-proj-name','new-proj-price'].forEach(id => $('#' + id).value = '');
   $('#new-proj-customer').value = '';
+  $('#new-proj-enduser').value = '';
   await loadProjectsRef();
   loadProjectsTable();
 };
@@ -808,21 +879,29 @@ $('#project-filter').onchange = () => loadProjectsTable();
 
 async function loadProjectsTable() {
   const filter = $('#project-filter').value;
-  let q = sb.from('projects').select('*').order('created_at', { ascending: false });
+  let q = sb.from('projects').select(`
+      *,
+      end_user:customers!projects_end_user_id_fkey(name)
+    `).order('created_at', { ascending: false });
   if (filter !== 'all') q = q.eq('status', filter);
   const { data } = await q;
   const showPrice = me?.can_see_pricing;
-  $('#projects-table tbody').innerHTML = (data || []).map(p => `
-    <tr>
-      <td><strong>${escapeHtml(p.full_tag)}</strong></td>
-      <td>${escapeHtml(p.customer_name)}</td>
-      <td>${escapeHtml(p.project_name)}</td>
-      <td>${p.quoted_office_mandays}+${p.quoted_cutover_mandays}c</td>
-      ${showPrice ? `<td>${p.price_ps ? 'S$' + Number(p.price_ps).toLocaleString() : '—'}</td>` : ''}
-      <td><span class="pill status-${p.status}">${p.status}</span></td>
-      <td><div class="row-actions">${buildProjectActions(p)}</div></td>
-    </tr>
-  `).join('') || `<tr><td colspan="7" class="muted">No projects.</td></tr>`;
+  $('#projects-table tbody').innerHTML = (data || []).map(p => {
+    const euName = p.end_user?.name || p.customer_name;
+    const euSameAsSI = p.end_user_id === p.customer_id;
+    return `
+      <tr>
+        <td><strong>${escapeHtml(p.full_tag)}</strong></td>
+        <td>${escapeHtml(p.customer_name)}</td>
+        <td>${escapeHtml(euName)}${euSameAsSI ? ' <span class="muted">(same)</span>' : ''}</td>
+        <td>${escapeHtml(p.project_name)}</td>
+        <td>${p.quoted_office_mandays}+${p.quoted_cutover_mandays}c</td>
+        ${showPrice ? `<td>${p.price_ps ? 'S$' + Number(p.price_ps).toLocaleString() : '—'}</td>` : ''}
+        <td><span class="pill status-${p.status}">${p.status}</span></td>
+        <td><div class="row-actions">${buildProjectActions(p)}</div></td>
+      </tr>
+    `;
+  }).join('') || `<tr><td colspan="8" class="muted">No projects.</td></tr>`;
 
   $$('#projects-table button[data-pid]').forEach(btn => {
     btn.onclick = () => setProjectStatus(btn.dataset.pid, btn.dataset.newStatus, btn.dataset.label);
@@ -839,7 +918,6 @@ function buildProjectActions(p) {
     return `<button class="btn btn-xs" data-pid="${p.id}" data-new-status="active" data-label="reopen">Reopen</button>`;
   }
 }
-
 async function setProjectStatus(projectId, newStatus, label) {
   if (label !== 'reopen') {
     if (!confirm(`${label} this project? Existing time entries remain intact.`)) return;
@@ -852,7 +930,6 @@ async function setProjectStatus(projectId, newStatus, label) {
   loadProjectsTable();
 }
 
-// ---------- go ----------
 initAuth();
 </script>
 </body>
