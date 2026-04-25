@@ -162,6 +162,15 @@
   .entry-bubble.admin { background: rgba(63,185,80,0.1); border-left-color: var(--green); }
   .entry-bubble strong { display: block; font-size: 11px; }
   .entry-bubble .small { color: var(--muted); font-size: 10px; }
+  /* Review states (Step 26b) */
+  .entry-bubble.flagged { outline: 1.5px solid var(--yellow); position: relative; }
+  .entry-bubble.flagged::after { content: '⚑'; position: absolute; top: 2px; right: 4px; color: var(--yellow); font-size: 11px; line-height: 1; }
+  .entry-bubble.rejected { outline: 1.5px solid var(--red); opacity: 0.6; position: relative; }
+  .entry-bubble.rejected strong, .entry-bubble.rejected .small { text-decoration: line-through; }
+  .entry-bubble.rejected::after { content: '✕'; position: absolute; top: 2px; right: 4px; color: var(--red); font-size: 11px; line-height: 1; }
+  .entry-bubble[data-clickable="1"] { cursor: pointer; transition: transform 0.1s, box-shadow 0.1s; }
+  .entry-bubble[data-clickable="1"]:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
+  .review-reason-hint { display: block; font-size: 10px; color: var(--muted); font-style: italic; margin-top: 2px; line-height: 1.3; }
   .modal-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,0.7);
     display: flex; align-items: center; justify-content: center;
@@ -745,7 +754,9 @@ async function renderTeamWeek() {
   root.innerHTML = `
     <div class="panel">
       <h2>Team Week — ${fmtDate(monday.toISOString())} to ${fmtDate(new Date(sunday-1).toISOString())}</h2>
-      <p style="color: var(--muted); font-size: 11px; margin-top: -8px;">↔ Swipe horizontally to see all 7 days</p>
+      <p style="color: var(--muted); font-size: 11px; margin-top: -8px;">
+        ↔ Swipe horizontally to see all 7 days${isManager ? ' · Tap any entry to flag/reject' : ''}
+      </p>
       <div class="week-grid-wrap">
         <div class="week-grid">
           <div class="cell header-cell name-cell">Engineer</div>
@@ -755,13 +766,20 @@ async function renderTeamWeek() {
             ${days.map((d, i) => {
               const items = cells[`${eng.id}|${i}`] || [];
               return `<div class="cell">${items.map(it => {
-                const cls = it.match_status === 'unmatched' ? 'unmatched' : (it.entry_type !== 'project' ? it.entry_type : '');
+                const typeCls = it.match_status === 'unmatched' ? 'unmatched' : (it.entry_type !== 'project' ? it.entry_type : '');
+                const reviewCls = (it.review_status === 'flagged' || it.review_status === 'rejected') ? it.review_status : '';
+                const cls = [typeCls, reviewCls].filter(Boolean).join(' ');
                 const customerLabel = it.customers?.name ? escapeHtml(it.customers.name) : (it.entry_type !== 'project' ? it.entry_type : 'unmatched');
                 const projLabel = it.projects?.project_code ? `<span class="badge">${escapeHtml(it.projects.project_code)}</span>` : '';
-                return `<div class="entry-bubble ${cls}">
+                const reasonHint = (it.review_status === 'flagged' || it.review_status === 'rejected') && it.review_reason
+                  ? `<span class="review-reason-hint">${it.review_status === 'flagged' ? '⚑' : '✕'} ${escapeHtml(it.review_reason)}</span>`
+                  : '';
+                const clickable = isManager ? 'data-clickable="1"' : '';
+                return `<div class="entry-bubble ${cls}" data-entry-id="${it.id}" ${clickable}>
                   <strong>${customerLabel}</strong>
                   <span class="small">${fmtTime(it.start_at)} · ${hoursBetween(it.start_at, it.end_at)}h</span>
                   ${projLabel}
+                  ${reasonHint}
                 </div>`;
               }).join('')}</div>`;
             }).join('')}
@@ -770,6 +788,109 @@ async function renderTeamWeek() {
       </div>
     </div>
   `;
+
+  // Wire click-to-review for managers (Step 26b)
+  if (isManager) {
+    const engineersById = {};
+    (engineers || []).forEach(e => { engineersById[e.id] = e; });
+    root.querySelectorAll('.entry-bubble[data-clickable="1"]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.dataset.entryId;
+        const entry = (entries || []).find(e => e.id === id);
+        if (entry) openReviewModal(entry, engineersById);
+      });
+    });
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Review modal (Step 26b) — manager-only flag/reject/reset on a work entry
+// ──────────────────────────────────────────────────────────────────
+function openReviewModal(entry, engineersById) {
+  if (!isManager) return;
+  const c = document.getElementById('modal-container');
+  const engName = engineersById?.[entry.engineer_id]?.name || '—';
+  const reviewerName = entry.reviewed_by ? (engineersById?.[entry.reviewed_by]?.name || 'Unknown') : null;
+  const status = entry.review_status || 'approved';
+  const statusBadge = status === 'approved'
+    ? '<span style="color: var(--green);">● Approved</span>'
+    : status === 'flagged'
+      ? '<span style="color: var(--yellow);">⚑ Flagged</span>'
+      : '<span style="color: var(--red);">✕ Rejected</span>';
+  const projectLabel = entry.projects?.project_code
+    ? `${escapeHtml(entry.projects.project_code)}${entry.projects.name ? ' — ' + escapeHtml(entry.projects.name || '') : ''}`
+    : '—';
+  const customerLabel = entry.customers?.name ? escapeHtml(entry.customers.name) : '—';
+
+  c.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal" style="min-width: 460px;">
+        <h3>Review entry</h3>
+        <div style="color: var(--muted); font-size: 12px; margin-bottom: 12px; line-height: 1.6;">
+          <strong style="color: var(--text);">${escapeHtml(engName)}</strong><br>
+          ${escapeHtml(fmtDateTime(entry.start_at))} → ${escapeHtml(fmtDateTime(entry.end_at))} · ${hoursBetween(entry.start_at, entry.end_at)}h<br>
+          Project: ${projectLabel}<br>
+          Customer: ${customerLabel}<br>
+          ${entry.raw_title ? 'Title: ' + escapeHtml(entry.raw_title) + '<br>' : ''}
+          Status: ${statusBadge}
+          ${reviewerName ? `<br><span style="font-size: 11px;">Last reviewed by ${escapeHtml(reviewerName)} · ${fmtDateTime(entry.reviewed_at)}</span>` : ''}
+          ${entry.review_reason ? `<br><span style="font-size: 11px; font-style: italic;">"${escapeHtml(entry.review_reason)}"</span>` : ''}
+        </div>
+        <div class="modal-row">
+          <label>Action</label>
+          <select id="review-action">
+            <option value="flag" ${status==='flagged'?'selected':''}>Flag (engineer should fix)</option>
+            <option value="reject" ${status==='rejected'?'selected':''}>Reject (exclude from utilisation)</option>
+            <option value="reset" ${status==='approved'?'selected':''}>Reset to approved</option>
+          </select>
+        </div>
+        <div class="modal-row" id="review-reason-row">
+          <label>Reason</label>
+          <textarea id="review-reason" rows="3" placeholder="Required for flag/reject (e.g. wrong project, double-booked)"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button id="review-cancel" class="secondary">Cancel</button>
+          <button id="review-submit">Submit</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  function syncReasonVisibility() {
+    const action = document.getElementById('review-action').value;
+    const row = document.getElementById('review-reason-row');
+    row.style.display = (action === 'reset') ? 'none' : '';
+  }
+  document.getElementById('review-action').addEventListener('change', syncReasonVisibility);
+  syncReasonVisibility();
+
+  document.getElementById('review-cancel').addEventListener('click', () => { c.innerHTML = ''; });
+  document.getElementById('review-submit').addEventListener('click', async () => {
+    const action = document.getElementById('review-action').value;
+    const reason = document.getElementById('review-reason').value.trim();
+    if ((action === 'flag' || action === 'reject') && !reason) {
+      toast('Reason is required when flagging or rejecting.', 'error');
+      return;
+    }
+    const btn = document.getElementById('review-submit');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    const { error } = await sb.rpc('rpc_review_work_entry', {
+      p_entry_id: entry.id,
+      p_action: action,
+      p_reason: action === 'reset' ? null : reason
+    });
+    if (error) {
+      toast('Review failed: ' + error.message, 'error');
+      btn.disabled = false; btn.textContent = 'Submit';
+      return;
+    }
+    const successMsg = action === 'reset' ? 'Entry reset to approved.'
+      : action === 'flag' ? 'Entry flagged.'
+      : 'Entry rejected.';
+    toast(successMsg, 'success');
+    c.innerHTML = '';
+    await renderTeamWeek();
+  });
 }
 
 async function renderManage() {
