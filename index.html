@@ -247,7 +247,7 @@
     <nav>
       <button data-view="my-schedule" class="active">My Schedule</button>
       <button data-view="team-week">Team Week</button>
-      <button data-view="manage">Manage</button>
+      <button id="nav-manage-btn" data-view="manage">Manage</button>
       <button id="signout-btn" class="secondary">Sign out</button>
     </nav>
   </header>
@@ -379,6 +379,9 @@ async function checkSession() {
       appEl.style.display = 'none';
       return;
     }
+    // Hide Manage tab for non-managers (defense in depth — RPCs also check)
+    const manageBtn = document.getElementById('nav-manage-btn');
+    if (manageBtn) manageBtn.style.display = isManager ? '' : 'none';
     // Show app FIRST, then render — so a render error doesn't leave a blank page
     hideBootLoading();
     signinEl.style.display = 'none';
@@ -895,6 +898,12 @@ function openReviewModal(entry, engineersById) {
 
 async function renderManage() {
   const root = document.getElementById('view-manage');
+  // Defense in depth: if a non-manager somehow reaches this view (e.g. cached
+  // nav button still visible), don't render it. RLS/RPCs also block writes.
+  if (!isManager) {
+    root.innerHTML = '<div class="panel"><h2>Not authorised</h2><p style="color: var(--muted);">The Manage tab is for managers only.</p></div>';
+    return;
+  }
   const { data: engineers } = await sb.from('engineers').select('*').order('name');
   const { data: customers } = await sb.from('customers').select('*').order('name');
   const { data: projects, error: projErr } = await sb.from('projects')
