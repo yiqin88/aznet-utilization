@@ -743,6 +743,17 @@ async function renderTeamWeek() {
   const { data: entries } = await sb.from('work_entries')
     .select('*, projects(project_code), customers:customer_id(name)')
     .gte('start_at', monday.toISOString()).lt('start_at', sunday.toISOString());
+  // Pre-fetch active projects + customers for the manager review modal dropdowns
+  // (manager-only — engineers don't open the modal)
+  let projectsForModal = [], customersForModal = [];
+  if (isManager) {
+    const [pRes, cRes] = await Promise.all([
+      sb.from('projects').select('id, project_code, name, customer_id, status').eq('status', 'active').order('project_code'),
+      sb.from('customers').select('id, name').eq('active', true).order('name')
+    ]);
+    projectsForModal = pRes.data || [];
+    customersForModal = cRes.data || [];
+  }
 
   const days = [];
   for (let i = 0; i < 7; i++) {
@@ -802,7 +813,7 @@ async function renderTeamWeek() {
       el.addEventListener('click', () => {
         const id = el.dataset.entryId;
         const entry = (entries || []).find(e => e.id === id);
-        if (entry) openReviewModal(entry, engineersById);
+        if (entry) openReviewModal(entry, engineersById, projectsForModal, customersForModal);
       });
     });
   }
@@ -811,7 +822,7 @@ async function renderTeamWeek() {
 // ──────────────────────────────────────────────────────────────────
 // Review modal (Step 26b) — manager-only flag/reject/reset on a work entry
 // ──────────────────────────────────────────────────────────────────
-function openReviewModal(entry, engineersById) {
+function openReviewModal(entry, engineersById, projectsList, customersList) {
   if (!isManager) return;
   const c = document.getElementById('modal-container');
   const engName = engineersById?.[entry.engineer_id]?.name || '—';
@@ -822,77 +833,184 @@ function openReviewModal(entry, engineersById) {
     : status === 'flagged'
       ? '<span style="color: var(--yellow);">⚑ Flagged</span>'
       : '<span style="color: var(--red);">✕ Rejected</span>';
-  const projectLabel = entry.projects?.project_code
-    ? `${escapeHtml(entry.projects.project_code)}${entry.projects.name ? ' — ' + escapeHtml(entry.projects.name || '') : ''}`
-    : '—';
   const customerLabel = entry.customers?.name ? escapeHtml(entry.customers.name) : '—';
+
+  // Re-categorise dropdowns are only meaningful for project entries
+  const isProjectEntry = entry.entry_type === 'project';
+  const currentProjectId = entry.project_id || '';
+  const currentCustomerId = entry.customer_id || '';
+
+  // Build project options
+  const projectOptions = (projectsList || []).map(p =>
+    `<option value="${p.id}" data-customer-id="${p.customer_id || ''}" ${p.id === currentProjectId ? 'selected' : ''}>${escapeHtml(p.project_code)}${p.name ? ' — ' + escapeHtml(p.name) : ''}</option>`
+  ).join('');
+  const customerOptions = (customersList || []).map(cu =>
+    `<option value="${cu.id}" ${cu.id === currentCustomerId ? 'selected' : ''}>${escapeHtml(cu.name)}</option>`
+  ).join('');
 
   c.innerHTML = `
     <div class="modal-backdrop">
-      <div class="modal" style="min-width: 460px;">
+      <div class="modal" style="min-width: 480px;">
         <h3>Review entry</h3>
         <div style="color: var(--muted); font-size: 12px; margin-bottom: 12px; line-height: 1.6;">
           <strong style="color: var(--text);">${escapeHtml(engName)}</strong><br>
           ${escapeHtml(fmtDateTime(entry.start_at))} → ${escapeHtml(fmtDateTime(entry.end_at))} · ${hoursBetween(entry.start_at, entry.end_at)}h<br>
-          Project: ${projectLabel}<br>
-          Customer: ${customerLabel}<br>
+          Type: ${escapeHtml(entry.entry_type)}<br>
           ${entry.raw_title ? 'Title: ' + escapeHtml(entry.raw_title) + '<br>' : ''}
           Status: ${statusBadge}
           ${reviewerName ? `<br><span style="font-size: 11px;">Last reviewed by ${escapeHtml(reviewerName)} · ${fmtDateTime(entry.reviewed_at)}</span>` : ''}
           ${entry.review_reason ? `<br><span style="font-size: 11px; font-style: italic;">"${escapeHtml(entry.review_reason)}"</span>` : ''}
         </div>
-        <div class="modal-row">
-          <label>Action</label>
-          <select id="review-action">
-            <option value="flag" ${status==='flagged'?'selected':''}>Flag (engineer should fix)</option>
-            <option value="reject" ${status==='rejected'?'selected':''}>Reject (exclude from utilisation)</option>
-            <option value="reset" ${status==='approved'?'selected':''}>Reset to approved</option>
-          </select>
+
+        ${isProjectEntry ? `
+        <div style="border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px;">
+          <div style="font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Re-categorise (optional)</div>
+          <div class="modal-row">
+            <label>Project</label>
+            <select id="reassign-project">
+              <option value="">— none —</option>
+              ${projectOptions}
+            </select>
+          </div>
+          <div class="modal-row">
+            <label>Customer</label>
+            <select id="reassign-customer">
+              <option value="">— none —</option>
+              ${customerOptions}
+            </select>
+            <span id="reassign-customer-hint" style="font-size: 10px; color: var(--muted); margin-top: 2px;"></span>
+          </div>
         </div>
-        <div class="modal-row" id="review-reason-row">
-          <label>Reason</label>
-          <textarea id="review-reason" rows="3" placeholder="Required for flag/reject (e.g. wrong project, double-booked)"></textarea>
+        ` : `
+        <div style="border-top: 1px solid var(--border); padding: 10px 0; margin-top: 10px; font-size: 11px; color: var(--muted); font-style: italic;">
+          To re-categorise this ${escapeHtml(entry.entry_type)} entry, flag it and have the engineer re-create as a project entry.
         </div>
+        `}
+
+        <div style="border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px;">
+          <div style="font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Review action</div>
+          <div class="modal-row">
+            <label>Action</label>
+            <select id="review-action">
+              <option value="none" selected>No change</option>
+              <option value="flag">Flag (engineer should fix)</option>
+              <option value="reject">Reject (exclude from utilisation)</option>
+              <option value="reset">Reset to approved</option>
+            </select>
+          </div>
+          <div class="modal-row" id="review-reason-row">
+            <label>Reason</label>
+            <textarea id="review-reason" rows="2" placeholder="Required when flagging, rejecting, or re-categorising"></textarea>
+          </div>
+        </div>
+
         <div class="modal-actions">
           <button id="review-cancel" class="secondary">Cancel</button>
-          <button id="review-submit">Submit</button>
+          <button id="review-submit">Save</button>
         </div>
       </div>
     </div>
   `;
 
-  function syncReasonVisibility() {
-    const action = document.getElementById('review-action').value;
-    const row = document.getElementById('review-reason-row');
-    row.style.display = (action === 'reset') ? 'none' : '';
+  // Project ↔ customer auto-fill + lock (only if project entry)
+  if (isProjectEntry) {
+    const projSel = document.getElementById('reassign-project');
+    const custSel = document.getElementById('reassign-customer');
+    const custHint = document.getElementById('reassign-customer-hint');
+    function syncCustomerFromProject() {
+      if (projSel.value) {
+        const opt = projSel.options[projSel.selectedIndex];
+        const derivedCustomerId = opt?.dataset?.customerId || '';
+        custSel.value = derivedCustomerId;
+        custSel.disabled = true;
+        custHint.textContent = 'Auto-filled from project. Clear project to edit customer manually.';
+      } else {
+        custSel.disabled = false;
+        custHint.textContent = '';
+      }
+    }
+    projSel.addEventListener('change', syncCustomerFromProject);
+    syncCustomerFromProject();
   }
-  document.getElementById('review-action').addEventListener('change', syncReasonVisibility);
-  syncReasonVisibility();
+
+  // Reason field is required for flag/reject AND for any re-categorisation
+  function syncReasonRequired() {
+    const action = document.getElementById('review-action').value;
+    const projChanged = isProjectEntry && document.getElementById('reassign-project').value !== currentProjectId;
+    const custChanged = isProjectEntry && document.getElementById('reassign-customer').value !== currentCustomerId;
+    const needsReason = action === 'flag' || action === 'reject' || projChanged || custChanged;
+    document.getElementById('review-reason-row').style.display = needsReason ? '' : 'none';
+  }
+  document.getElementById('review-action').addEventListener('change', syncReasonRequired);
+  if (isProjectEntry) {
+    document.getElementById('reassign-project').addEventListener('change', syncReasonRequired);
+    document.getElementById('reassign-customer').addEventListener('change', syncReasonRequired);
+  }
+  syncReasonRequired();
 
   document.getElementById('review-cancel').addEventListener('click', () => { c.innerHTML = ''; });
   document.getElementById('review-submit').addEventListener('click', async () => {
     const action = document.getElementById('review-action').value;
     const reason = document.getElementById('review-reason').value.trim();
-    if ((action === 'flag' || action === 'reject') && !reason) {
-      toast('Reason is required when flagging or rejecting.', 'error');
+    const newProjectId = isProjectEntry ? (document.getElementById('reassign-project').value || null) : null;
+    const newCustomerId = isProjectEntry ? (document.getElementById('reassign-customer').value || null) : null;
+    const projChanged = isProjectEntry && (newProjectId || '') !== currentProjectId;
+    const custChanged = isProjectEntry && (newCustomerId || '') !== currentCustomerId;
+    const recategorise = projChanged || custChanged;
+
+    if ((action === 'flag' || action === 'reject' || recategorise) && !reason) {
+      toast('Reason is required when flagging, rejecting, or re-categorising.', 'error');
       return;
     }
+    if (action === 'none' && !recategorise) {
+      toast('Nothing to save — change an action or re-categorise.', 'error');
+      return;
+    }
+    // Project entries must reference a project (the RPC enforces this; check up front for nicer UX)
+    if (recategorise && entry.entry_type === 'project' && !newProjectId) {
+      toast('Project entries must reference a project. Pick one or change the action.', 'error');
+      return;
+    }
+
     const btn = document.getElementById('review-submit');
     btn.disabled = true; btn.textContent = 'Saving…';
-    const { error } = await sb.rpc('rpc_review_work_entry', {
-      p_entry_id: entry.id,
-      p_action: action,
-      p_reason: action === 'reset' ? null : reason
-    });
-    if (error) {
-      toast('Review failed: ' + error.message, 'error');
-      btn.disabled = false; btn.textContent = 'Submit';
-      return;
+
+    // Step 1: re-categorise if needed (this auto-flags via the RPC)
+    if (recategorise) {
+      const { error: rErr } = await sb.rpc('rpc_reassign_work_entry', {
+        p_entry_id: entry.id,
+        p_entry_type: entry.entry_type,
+        p_project_id: newProjectId,
+        p_customer_id: newCustomerId,
+        p_is_cutover: entry.is_cutover,
+        p_review_reason: reason
+      });
+      if (rErr) {
+        toast('Re-categorise failed: ' + rErr.message, 'error');
+        btn.disabled = false; btn.textContent = 'Save';
+        return;
+      }
     }
-    const successMsg = action === 'reset' ? 'Entry reset to approved.'
-      : action === 'flag' ? 'Entry flagged.'
-      : 'Entry rejected.';
-    toast(successMsg, 'success');
+    // Step 2: explicit review action overrides the auto-flag if set
+    if (action !== 'none') {
+      const { error: revErr } = await sb.rpc('rpc_review_work_entry', {
+        p_entry_id: entry.id,
+        p_action: action,
+        p_reason: action === 'reset' ? null : reason
+      });
+      if (revErr) {
+        toast('Review action failed: ' + revErr.message, 'error');
+        btn.disabled = false; btn.textContent = 'Save';
+        return;
+      }
+    }
+
+    const parts = [];
+    if (recategorise) parts.push('re-categorised');
+    if (action === 'flag') parts.push('flagged');
+    else if (action === 'reject') parts.push('rejected');
+    else if (action === 'reset') parts.push('reset to approved');
+    toast('Entry ' + parts.join(' and ') + '.', 'success');
     c.innerHTML = '';
     await renderTeamWeek();
   });
