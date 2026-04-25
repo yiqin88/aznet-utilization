@@ -273,12 +273,49 @@ function escapeHtml(s) {
 
 // ============================ AUTH ============================
 async function checkSession() {
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) {
+  try {
+    const { data: { session }, error: sessionErr } = await sb.auth.getSession();
+    if (sessionErr) throw sessionErr;
+
+    if (!session) {
+      document.getElementById('signin-page').style.display = 'flex';
+      document.getElementById('app').style.display = 'none';
+      return;
+    }
+
+    // Enforce @aznet.sg domain
+    if (!session.user.email || !session.user.email.toLowerCase().endsWith('@aznet.sg')) {
+      toast('Only @aznet.sg accounts can use this app.', 'error');
+      await sb.auth.signOut();
+      document.getElementById('signin-page').style.display = 'flex';
+      document.getElementById('app').style.display = 'none';
+      return;
+    }
+
+    currentUser = session.user;
+    await loadCurrentEngineer();
+
+    // If we couldn't load engineer record, don't proceed into the app
+    if (!currentEngineer) {
+      document.getElementById('signin-page').style.display = 'flex';
+      document.getElementById('app').style.display = 'none';
+      return;
+    }
+
+    document.getElementById('signin-page').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+
+    await renderMySchedule();
+  } catch (err) {
+    console.error('Session init failed:', err);
+    toast('Sign-in error: ' + (err.message || err), 'error');
+    // Fail open to sign-in page rather than blank screen
     document.getElementById('signin-page').style.display = 'flex';
     document.getElementById('app').style.display = 'none';
-    return;
+    // Try to clear potentially-corrupt session
+    try { await sb.auth.signOut(); } catch (_) {}
   }
+}
 
   // Enforce @aznet.sg domain — Microsoft SSO might let in other tenants if not configured carefully
   if (!session.user.email || !session.user.email.toLowerCase().endsWith('@aznet.sg')) {
