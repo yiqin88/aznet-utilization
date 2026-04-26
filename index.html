@@ -249,6 +249,7 @@
       <button data-view="my-schedule" class="active">My Schedule</button>
       <button data-view="team-week">Team Week</button>
       <button id="nav-manage-btn" data-view="manage">Manage</button>
+      <button id="nav-utilisation-btn" data-view="utilisation">Utilisation</button>
       <button id="nav-audit-btn" data-view="audit">Audit</button>
       <button id="signout-btn" class="secondary">Sign out</button>
     </nav>
@@ -257,6 +258,7 @@
     <div id="view-my-schedule"></div>
     <div id="view-team-week" style="display:none"></div>
     <div id="view-manage" style="display:none"></div>
+    <div id="view-utilisation" style="display:none"></div>
     <div id="view-audit" style="display:none"></div>
   </main>
 </div>
@@ -387,6 +389,8 @@ async function checkSession() {
     if (manageBtn) manageBtn.style.display = isManager ? '' : 'none';
     const auditBtn = document.getElementById('nav-audit-btn');
     if (auditBtn) auditBtn.style.display = isManager ? '' : 'none';
+    const utilBtn = document.getElementById('nav-utilisation-btn');
+    if (utilBtn) utilBtn.style.display = isManager ? '' : 'none';
     // Show app FIRST, then render — so a render error doesn't leave a blank page
     hideBootLoading();
     signinEl.style.display = 'none';
@@ -463,9 +467,11 @@ document.querySelectorAll('nav button[data-view]').forEach(btn => {
     document.getElementById('view-my-schedule').style.display = v === 'my-schedule' ? 'block' : 'none';
     document.getElementById('view-team-week').style.display = v === 'team-week' ? 'block' : 'none';
     document.getElementById('view-manage').style.display = v === 'manage' ? 'block' : 'none';
+    document.getElementById('view-utilisation').style.display = v === 'utilisation' ? 'block' : 'none';
     document.getElementById('view-audit').style.display = v === 'audit' ? 'block' : 'none';
     if (v === 'team-week') renderTeamWeek();
     if (v === 'manage') renderManage();
+    if (v === 'utilisation') renderUtilisation();
     if (v === 'audit') renderAuditLog();
     if (v === 'my-schedule') renderMySchedule();
   });
@@ -1529,6 +1535,160 @@ function openConfirmPOModal(po, customers) {
     c.innerHTML = '';
     await renderManage();
   });
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Utilisation view (Step C2)
+//
+// Reads from v_project_utilisation. Banded MDs for office, flat 1 MD per
+// cutover entry. Click row → engineer breakdown (Step C3, not yet built).
+// ──────────────────────────────────────────────────────────────────
+let _utilFilter = 'all';  // 'all' | 'active' | 'at-risk' | 'over'
+
+async function renderUtilisation() {
+  const root = document.getElementById('view-utilisation');
+  if (!isManager) {
+    root.innerHTML = '<div class="panel"><h2>Not authorised</h2><p style="color: var(--muted);">Utilisation is for managers only.</p></div>';
+    return;
+  }
+
+  const { data: rows, error } = await sb.from('v_project_utilisation')
+    .select('*')
+    .order('total_pct_used', { ascending: false, nullsFirst: false });
+  if (error) {
+    root.innerHTML = `<div class="panel"><h2>Utilisation</h2><p style="color: var(--red);">Failed to load: ${escapeHtml(error.message)}</p></div>`;
+    return;
+  }
+
+  const filtered = (rows || []).filter(r => {
+    if (_utilFilter === 'all') return true;
+    if (_utilFilter === 'active') return r.status === 'active';
+    if (_utilFilter === 'at-risk') return r.total_pct_used !== null && r.total_pct_used >= 80 && r.total_pct_used <= 100;
+    if (_utilFilter === 'over') return r.total_pct_used !== null && r.total_pct_used > 100;
+    return true;
+  });
+
+  // Aggregate stats for header
+  const totalQuoted = (rows || []).reduce((s, r) => s + (parseFloat(r.quoted_total_md) || 0), 0);
+  const totalLogged = (rows || []).reduce((s, r) => s + (parseFloat(r.total_md_logged) || 0), 0);
+  const overCount = (rows || []).filter(r => r.total_pct_used !== null && r.total_pct_used > 100).length;
+  const atRiskCount = (rows || []).filter(r => r.total_pct_used !== null && r.total_pct_used >= 80 && r.total_pct_used <= 100).length;
+
+  const filterChip = (key, label, count) => {
+    const active = _utilFilter === key;
+    return `<button class="util-filter-btn ${active ? 'active' : ''}" data-filter="${key}" style="padding: 4px 10px; font-size: 11px; border-radius: 12px; border: 1px solid var(--border); background: ${active ? 'var(--accent)' : 'transparent'}; color: ${active ? '#000' : 'var(--text)'}; cursor: pointer; margin-right: 6px;">${label}${count !== undefined ? ' · ' + count : ''}</button>`;
+  };
+
+  root.innerHTML = `
+    <div class="panel">
+      <h2>Utilisation</h2>
+      <p style="color: var(--muted); font-size: 11px; margin-top: -8px;">
+        Office MDs use banded calculation (&lt;1h=0.125, &lt;2h=0.25, &lt;4h=0.5, ≥4h=1). Cutover MDs flat 1 per entry.
+        Excludes rejected entries and non-project entries.
+      </p>
+
+      <div style="display: flex; gap: 24px; align-items: center; margin-bottom: 12px; padding: 10px 12px; background: var(--panel); border-radius: 4px; flex-wrap: wrap;">
+        <div style="font-size: 11px;">
+          <span style="color: var(--muted);">Quoted total:</span>
+          <strong style="color: var(--text); font-size: 14px;"> ${totalQuoted.toFixed(1)} MD</strong>
+        </div>
+        <div style="font-size: 11px;">
+          <span style="color: var(--muted);">Logged total:</span>
+          <strong style="color: var(--text); font-size: 14px;"> ${totalLogged.toFixed(1)} MD</strong>
+        </div>
+        <div style="font-size: 11px;">
+          <span style="color: var(--muted);">At-risk (80-100%):</span>
+          <strong style="color: var(--yellow); font-size: 14px;"> ${atRiskCount}</strong>
+        </div>
+        <div style="font-size: 11px;">
+          <span style="color: var(--muted);">Over budget (&gt;100%):</span>
+          <strong style="color: var(--red); font-size: 14px;"> ${overCount}</strong>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        ${filterChip('all', 'All', (rows || []).length)}
+        ${filterChip('active', 'Active only', (rows || []).filter(r => r.status === 'active').length)}
+        ${filterChip('at-risk', 'At-risk', atRiskCount)}
+        ${filterChip('over', 'Over budget', overCount)}
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Project</th>
+            <th>Customer</th>
+            <th>Office MD<br><span style="font-weight: normal; color: var(--muted); font-size: 10px;">logged / quoted</span></th>
+            <th>Cutover MD<br><span style="font-weight: normal; color: var(--muted); font-size: 10px;">logged / quoted</span></th>
+            <th>% used</th>
+            <th>Engineers</th>
+            <th>Last entry</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.length === 0 ? `
+            <tr><td colspan="8" style="text-align: center; color: var(--muted); padding: 24px;">No projects match the current filter.</td></tr>
+          ` : filtered.map(r => {
+            const officeBar = renderUtilBar(r.office_md_logged, r.quoted_office_md);
+            const cutoverBar = renderUtilBar(r.cutover_md_logged, r.quoted_cutover_md);
+            const pct = r.total_pct_used;
+            const pctColor = pct === null ? 'var(--muted)'
+              : pct > 100 ? 'var(--red)'
+              : pct >= 80 ? 'var(--yellow)'
+              : 'var(--green)';
+            const pctLabel = pct === null ? '—' : pct.toFixed(1) + '%';
+            const lastEntry = r.last_entry_at ? fmtDate(r.last_entry_at) : '<span style="color: var(--muted);">never</span>';
+            const statusCls = r.status==='active'?'green':r.status==='completed'?'blue':'gray';
+            return `
+              <tr>
+                <td>
+                  <span class="badge">${escapeHtml(r.full_tag || ('aznet-'+r.project_code))}</span>
+                  <br><span style="font-size: 11px; color: var(--muted);">${escapeHtml(r.name || '—')}</span>
+                </td>
+                <td style="font-size: 11px;">${escapeHtml(r.customer_name || '—')}${r.end_user_name && r.end_user_name !== r.customer_name ? `<br><span style="color: var(--muted);">→ ${escapeHtml(r.end_user_name)}</span>` : ''}</td>
+                <td>${officeBar}</td>
+                <td>${cutoverBar}</td>
+                <td><strong style="color: ${pctColor}; font-size: 14px;">${pctLabel}</strong></td>
+                <td style="font-size: 11px;">${r.distinct_engineers || 0}</td>
+                <td style="font-size: 11px; color: var(--muted);">${lastEntry}</td>
+                <td><span class="pill pill-${statusCls}">${escapeHtml(r.status)}</span></td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  // Filter chip click handlers
+  document.querySelectorAll('.util-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _utilFilter = btn.dataset.filter;
+      renderUtilisation();
+    });
+  });
+}
+
+// Helper: render a "logged / quoted" bar with a fill proportional to usage.
+// Bar caps visually at 100% width but text shows true number even if over.
+function renderUtilBar(logged, quoted) {
+  const log = parseFloat(logged) || 0;
+  const quo = parseFloat(quoted) || 0;
+  if (quo === 0 && log === 0) return '<span style="color: var(--muted); font-size: 11px;">—</span>';
+  const pct = quo > 0 ? (log / quo) * 100 : 0;
+  const widthPct = Math.min(pct, 100);
+  const overrun = pct > 100;
+  const barColor = overrun ? 'var(--red)' : pct >= 80 ? 'var(--yellow)' : 'var(--green)';
+  return `
+    <div style="font-size: 11px; line-height: 1.2;">
+      <div style="margin-bottom: 2px;"><strong>${log.toFixed(2)}</strong> / ${quo.toFixed(1)}</div>
+      <div style="height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; position: relative;">
+        <div style="height: 100%; width: ${widthPct}%; background: ${barColor}; transition: width 0.2s;"></div>
+        ${overrun ? `<div style="position: absolute; top: 0; right: 0; height: 100%; width: 2px; background: var(--red);"></div>` : ''}
+      </div>
+    </div>
+  `;
 }
 
 // ──────────────────────────────────────────────────────────────────
