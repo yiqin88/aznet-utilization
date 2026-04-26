@@ -1701,18 +1701,8 @@ async function renderAuditLog() {
     return;
   }
 
-  const { data: logs, error } = await sb.from('audit_log')
-    .select('id, table_name, record_id, action, actor_user_id, actor_label, old_values, new_values, changed_at')
-    .order('changed_at', { ascending: false })
-    .limit(100);
+  const { data: logs, error } = await sb.rpc('rpc_recent_audit_log', { p_limit: 100 });
   if (error) { root.innerHTML = `<div class="panel"><h2>Audit log</h2><p style="color: var(--red);">Failed to load: ${escapeHtml(error.message)}</p></div>`; return; }
-
-  // Build engineer-id → name map for actor display (current users with auth)
-  const { data: engineers } = await sb.from('engineers').select('id, name, email');
-  const emailToName = {};
-  (engineers || []).forEach(e => { if (e.email) emailToName[e.email.toLowerCase()] = e.name; });
-  // We don't have a direct user_id → engineer mapping, but auth.users.id should match engineer email's user
-  // Fallback: just show actor_user_id as a partial UUID, plus actor_label which is human-readable for system actions
 
   const actionPill = (a) => {
     const cls = a === 'insert' ? 'pill-green'
@@ -1749,9 +1739,8 @@ async function renderAuditLog() {
         </thead>
         <tbody>
           ${(logs || []).map(l => {
-            const actorDisplay = l.actor_label
-              ? escapeHtml(l.actor_label)
-              : l.actor_user_id ? `<span style="font-family: monospace; font-size: 10px;">${escapeHtml(l.actor_user_id.slice(0, 8))}</span>`
+            const actorDisplay = l.actor_display
+              ? escapeHtml(l.actor_display)
               : '<span style="color: var(--muted);">system</span>';
             return `
               <tr>
