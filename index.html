@@ -1716,7 +1716,7 @@ async function renderUtilisation() {
             <th>Cutover MD<br><span style="font-weight: normal; color: var(--muted); font-size: 10px;">logged / quoted</span></th>
             <th>% used</th>
             <th>Engineers</th>
-            <th>Last entry</th>
+            <th>Activity</th>
             <th>Status</th>
           </tr>
         </thead>
@@ -1732,7 +1732,8 @@ async function renderUtilisation() {
               : pct >= 80 ? 'var(--yellow)'
               : 'var(--green)';
             const pctLabel = pct === null ? '—' : pct.toFixed(1) + '%';
-            const lastEntry = r.last_entry_at ? fmtDate(r.last_entry_at) : '<span style="color: var(--muted);">never</span>';
+            const lastEntry = r.last_entry_at ? fmtDate(r.last_entry_at) : null;
+            const activityHtml = renderActivityCell(r);
             const statusCls = r.status==='active'?'green':r.status==='completed'?'blue':'gray';
             const poNum = r.po_number ? escapeHtml(r.po_number) : '<span style="color: var(--muted);">—</span>';
             return `
@@ -1747,7 +1748,7 @@ async function renderUtilisation() {
                 <td>${cutoverBar}</td>
                 <td><strong style="color: ${pctColor}; font-size: 14px;">${pctLabel}</strong></td>
                 <td style="font-size: 11px;">${r.distinct_engineers || 0}</td>
-                <td style="font-size: 11px; color: var(--muted);">${lastEntry}</td>
+                <td>${activityHtml}</td>
                 <td><span class="pill pill-${statusCls}">${escapeHtml(r.status)}</span></td>
               </tr>
             `;
@@ -1768,6 +1769,44 @@ async function renderUtilisation() {
 
 // Helper: render a "logged / quoted" bar with a fill proportional to usage.
 // Bar caps visually at 100% width but text shows true number even if over.
+// Activity cell for the Utilisation tab. Shows last-entry date + lifespan info.
+// Color cues for active projects: green/yellow/red based on staleness.
+// Completed projects show duration instead of staleness.
+function renderActivityCell(r) {
+  const lastEntry = r.last_entry_at ? fmtDate(r.last_entry_at) : null;
+  const daysSinceActivity = r.days_since_activity;  // null if no entries
+  const daysSinceCreated = r.days_since_created ?? 0;
+  const createdLabel = r.created_at ? fmtDate(r.created_at) : '—';
+  const isCompleted = r.status === 'completed';
+  const daysToComplete = r.days_to_complete;
+
+  // Top line: activity recency for active; completion duration for completed
+  let topMain, topColor, topSub = '';
+  if (isCompleted) {
+    topMain = daysToComplete !== null ? `Completed in ${daysToComplete}d` : 'Completed';
+    topColor = 'var(--accent)';
+  } else if (lastEntry === null) {
+    topMain = 'No entries yet';
+    topColor = 'var(--muted)';
+  } else {
+    if (daysSinceActivity <= 7) topColor = 'var(--green)';
+    else if (daysSinceActivity <= 30) topColor = 'var(--yellow)';
+    else topColor = 'var(--red)';
+    topMain = lastEntry;
+    if (daysSinceActivity > 0) topSub = `· ${daysSinceActivity}d ago`;
+  }
+
+  const ageLabel = !isCompleted && daysSinceCreated > 0 ? ` · ${daysSinceCreated}d old` : '';
+  const bottomLine = `Started ${createdLabel}${ageLabel}`;
+
+  return `
+    <div style="font-size: 11px; line-height: 1.3;">
+      <div style="color: ${topColor};"><strong>${escapeHtml(topMain)}</strong>${topSub ? ` <span style="color: var(--muted); font-weight: normal;">${escapeHtml(topSub)}</span>` : ''}</div>
+      <div style="color: var(--muted); font-size: 10px; margin-top: 2px;">${escapeHtml(bottomLine)}</div>
+    </div>
+  `;
+}
+
 function renderUtilBar(logged, quoted) {
   const log = parseFloat(logged) || 0;
   const quo = parseFloat(quoted) || 0;
