@@ -543,7 +543,7 @@ async function renderMySchedule() {
           <select id="entries-filter">
             <option value="all">All</option>
             <option value="unmatched">Unmatched only</option>
-            <option value="unconfirmed">Unconfirmed only</option>
+            <option value="unconfirmed">Not yet reviewed</option>
           </select>
         </div>
       </div>
@@ -612,7 +612,7 @@ function renderEntriesTable(entries) {
     const proj = e.projects;
     const cust = e.customers;
     return `<tr>
-      <td>${escapeHtml(fmtDateTime(e.start_at))}</td>
+      <td>${e.confirmed ? '<span style="color: var(--green); margin-right: 4px;" title="Reviewed">✓</span>' : ''}${escapeHtml(fmtDateTime(e.start_at))}</td>
       <td>${escapeHtml(e.raw_title || '—')} ${e.is_cutover ? '<span class="pill pill-purple">cutover</span>' : ''}</td>
       <td>${cust ? escapeHtml(cust.name) : '—'}</td>
       <td>${proj ? `<span class="badge">${escapeHtml(proj.project_code)}</span>` : '—'}</td>
