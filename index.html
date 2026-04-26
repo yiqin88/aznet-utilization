@@ -249,6 +249,7 @@
       <button data-view="my-schedule" class="active">My Schedule</button>
       <button data-view="team-week">Team Week</button>
       <button id="nav-manage-btn" data-view="manage">Manage</button>
+      <button id="nav-audit-btn" data-view="audit">Audit</button>
       <button id="signout-btn" class="secondary">Sign out</button>
     </nav>
   </header>
@@ -256,6 +257,7 @@
     <div id="view-my-schedule"></div>
     <div id="view-team-week" style="display:none"></div>
     <div id="view-manage" style="display:none"></div>
+    <div id="view-audit" style="display:none"></div>
   </main>
 </div>
 
@@ -383,6 +385,8 @@ async function checkSession() {
     // Hide Manage tab for non-managers (defense in depth — RPCs also check)
     const manageBtn = document.getElementById('nav-manage-btn');
     if (manageBtn) manageBtn.style.display = isManager ? '' : 'none';
+    const auditBtn = document.getElementById('nav-audit-btn');
+    if (auditBtn) auditBtn.style.display = isManager ? '' : 'none';
     // Show app FIRST, then render — so a render error doesn't leave a blank page
     hideBootLoading();
     signinEl.style.display = 'none';
@@ -459,8 +463,10 @@ document.querySelectorAll('nav button[data-view]').forEach(btn => {
     document.getElementById('view-my-schedule').style.display = v === 'my-schedule' ? 'block' : 'none';
     document.getElementById('view-team-week').style.display = v === 'team-week' ? 'block' : 'none';
     document.getElementById('view-manage').style.display = v === 'manage' ? 'block' : 'none';
+    document.getElementById('view-audit').style.display = v === 'audit' ? 'block' : 'none';
     if (v === 'team-week') renderTeamWeek();
     if (v === 'manage') renderManage();
+    if (v === 'audit') renderAuditLog();
     if (v === 'my-schedule') renderMySchedule();
   });
 });
@@ -1029,10 +1035,11 @@ async function renderManage() {
   const { data: projects, error: projErr } = await sb.from('projects')
     .select(`
       id, project_code, name, status, full_tag, customer_id, end_user_id,
+      quoted_office_mandays, quoted_cutover_mandays, price_ps, source,
       customer:customer_id(id, name),
       end_user:end_user_id(id, name),
       project_engineers(engineer_id, is_lead, engineers!project_engineers_engineer_id_fkey(id, name))
-    `).order('project_code');
+    `).neq('status', 'deleted').neq('status', 'pending_confirmation').order('project_code');
   if (projErr) { console.error('Projects query failed:', projErr); toast('Failed to load projects: ' + projErr.message, 'error'); }
 
   root.innerHTML = `
@@ -1102,6 +1109,9 @@ async function renderManage() {
         <select id="proj-customer"><option value="">SI customer (Invoiced)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
         <select id="proj-enduser"><option value="">End user (Beneficiary)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
         <input type="text" id="proj-name" placeholder="Name (e.g. Mandai IT Infra Pkg 1)">
+        <input type="number" id="proj-office-md" placeholder="Office MDs" step="0.5" min="0" style="max-width: 110px;">
+        <input type="number" id="proj-cutover-md" placeholder="Cutover MDs" step="0.5" min="0" style="max-width: 120px;">
+        <input type="number" id="proj-price" placeholder="PS price (SGD)" step="100" min="0" style="max-width: 140px;">
         <button id="proj-add">Create project</button>
       </div>
       <table>
@@ -1126,10 +1136,12 @@ async function renderManage() {
                 <td><span class="pill pill-${p.status==='active'?'green':p.status==='completed'?'blue':'gray'}">${escapeHtml(p.status)}</span></td>
                 <td>
                   <button class="small secondary manage-team-btn" data-id="${p.id}">Manage team</button>
+                  <button class="small secondary edit-project-btn" data-id="${p.id}">Edit</button>
                   ${p.status === 'active'
                     ? `<button class="small secondary set-status-btn" data-id="${p.id}" data-status="completed">Complete</button>
                        <button class="small secondary set-status-btn" data-id="${p.id}" data-status="cancelled">Cancel</button>`
                     : `<button class="small secondary set-status-btn" data-id="${p.id}" data-status="active">Reopen</button>`}
+                  <button class="small danger delete-project-btn" data-id="${p.id}" data-code="${escapeHtml(p.full_tag || ('aznet-'+p.project_code))}">Delete</button>
                 </td>
               </tr>
             `;
@@ -1178,11 +1190,21 @@ async function renderManage() {
   });
 
   document.getElementById('proj-add').addEventListener('click', async () => {
+    const code = document.getElementById('proj-code').value.trim();
+    const name = document.getElementById('proj-name').value.trim();
+    if (!code || !name) { toast('Code and name are required.', 'error'); return; }
+    const officeMd = parseFloat(document.getElementById('proj-office-md').value) || 0;
+    const cutoverMd = parseFloat(document.getElementById('proj-cutover-md').value) || 0;
+    const priceRaw = document.getElementById('proj-price').value;
+    const price = priceRaw === '' ? null : parseFloat(priceRaw);
     const { error } = await sb.rpc('rpc_create_project', {
-      p_project_code: document.getElementById('proj-code').value,
+      p_project_code: code,
       p_customer_id: document.getElementById('proj-customer').value || null,
-      p_end_user_id: document.getElementById('proj-enduser').value || null,
-      p_name: document.getElementById('proj-name').value
+      p_project_name: name,
+      p_quoted_office_mandays: officeMd,
+      p_quoted_cutover_mandays: cutoverMd,
+      p_price_ps: price,
+      p_end_user_id: document.getElementById('proj-enduser').value || null
     });
     if (error) { toast(error.message, 'error'); return; }
     toast('Project created.', 'success');
@@ -1204,6 +1226,201 @@ async function renderManage() {
   document.querySelectorAll('.manage-team-btn').forEach(btn => {
     btn.addEventListener('click', () => openManageTeamModal(btn.dataset.id));
   });
+
+  document.querySelectorAll('.edit-project-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const proj = (projects || []).find(p => p.id === btn.dataset.id);
+      if (proj) openEditProjectModal(proj, customers || []);
+    });
+  });
+
+  document.querySelectorAll('.delete-project-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const code = btn.dataset.code;
+      const reason = prompt(`Delete project ${code}?\n\nThis is a soft delete — the project becomes hidden but recoverable from the audit log.\n\nReason (recorded in audit log):`);
+      if (reason === null) return;
+      if (!reason.trim()) { toast('A deletion reason is required.', 'error'); return; }
+      const { error } = await sb.rpc('rpc_soft_delete_project', {
+        p_project_id: btn.dataset.id,
+        p_reason: reason.trim()
+      });
+      if (error) { toast(error.message, 'error'); return; }
+      toast('Project deleted.', 'success');
+      await renderManage();
+    });
+  });
+}
+
+function openEditProjectModal(project, customers) {
+  if (!isManager) return;
+  const c = document.getElementById('modal-container');
+  const customerOpts = (customers || []).map(cu =>
+    `<option value="${cu.id}">${escapeHtml(cu.name)}</option>`
+  ).join('');
+
+  c.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal" style="min-width: 480px;">
+        <h3>Edit project</h3>
+        <div style="color: var(--muted); font-size: 12px; margin-bottom: 12px;">
+          <span class="badge">${escapeHtml(project.full_tag || ('aznet-'+project.project_code))}</span>
+          ${project.source === 'po_email' ? '<span class="pill pill-blue" style="margin-left: 6px;">from PO</span>' : ''}
+          <br><span style="font-size: 10px;">Project code is immutable. To rename, delete and re-create.</span>
+        </div>
+        <div class="modal-row">
+          <label>Name</label>
+          <input type="text" id="ep-name" value="${escapeHtml(project.name || '')}">
+        </div>
+        <div class="modal-row">
+          <label>Customer (SI)</label>
+          <select id="ep-customer">
+            <option value="">— none —</option>
+            ${customerOpts}
+          </select>
+        </div>
+        <div class="modal-row">
+          <label>End user (EU)</label>
+          <select id="ep-enduser">
+            <option value="">— none —</option>
+            ${customerOpts}
+          </select>
+        </div>
+        <div class="modal-row">
+          <label>Office MDs</label>
+          <input type="number" id="ep-office-md" step="0.5" min="0" value="${project.quoted_office_mandays ?? 0}">
+        </div>
+        <div class="modal-row">
+          <label>Cutover MDs</label>
+          <input type="number" id="ep-cutover-md" step="0.5" min="0" value="${project.quoted_cutover_mandays ?? 0}">
+        </div>
+        <div class="modal-row">
+          <label>PS price (SGD)</label>
+          <input type="number" id="ep-price" step="100" min="0" value="${project.price_ps ?? ''}">
+        </div>
+        <div class="modal-row">
+          <label>Status</label>
+          <select id="ep-status">
+            <option value="active" ${project.status==='active'?'selected':''}>Active</option>
+            <option value="completed" ${project.status==='completed'?'selected':''}>Completed</option>
+            <option value="cancelled" ${project.status==='cancelled'?'selected':''}>Cancelled</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button id="ep-cancel" class="secondary">Cancel</button>
+          <button id="ep-save">Save</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('ep-cancel').addEventListener('click', () => { c.innerHTML = ''; });
+
+  // Set selected values for dropdowns (cleaner than regex-injecting selected attrs)
+  if (project.customer_id) document.getElementById('ep-customer').value = project.customer_id;
+  if (project.end_user_id) document.getElementById('ep-enduser').value = project.end_user_id;
+
+  document.getElementById('ep-save').addEventListener('click', async () => {
+    const btn = document.getElementById('ep-save');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    const priceRaw = document.getElementById('ep-price').value;
+    const { error } = await sb.rpc('rpc_update_project', {
+      p_project_id: project.id,
+      p_project_name: document.getElementById('ep-name').value.trim() || null,
+      p_customer_id: document.getElementById('ep-customer').value || null,
+      p_end_user_id: document.getElementById('ep-enduser').value || null,
+      p_quoted_office_mandays: parseFloat(document.getElementById('ep-office-md').value) || 0,
+      p_quoted_cutover_mandays: parseFloat(document.getElementById('ep-cutover-md').value) || 0,
+      p_price_ps: priceRaw === '' ? null : parseFloat(priceRaw),
+      p_status: document.getElementById('ep-status').value
+    });
+    if (error) {
+      toast('Update failed: ' + error.message, 'error');
+      btn.disabled = false; btn.textContent = 'Save';
+      return;
+    }
+    toast('Project updated.', 'success');
+    c.innerHTML = '';
+    await renderManage();
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Audit log view
+// ──────────────────────────────────────────────────────────────────
+async function renderAuditLog() {
+  const root = document.getElementById('view-audit');
+  if (!isManager) {
+    root.innerHTML = '<div class="panel"><h2>Not authorised</h2><p style="color: var(--muted);">The Audit log is for managers only.</p></div>';
+    return;
+  }
+
+  const { data: logs, error } = await sb.from('audit_log')
+    .select('id, table_name, record_id, action, actor_user_id, actor_label, old_values, new_values, changed_at')
+    .order('changed_at', { ascending: false })
+    .limit(100);
+  if (error) { root.innerHTML = `<div class="panel"><h2>Audit log</h2><p style="color: var(--red);">Failed to load: ${escapeHtml(error.message)}</p></div>`; return; }
+
+  // Build engineer-id → name map for actor display (current users with auth)
+  const { data: engineers } = await sb.from('engineers').select('id, name, email');
+  const emailToName = {};
+  (engineers || []).forEach(e => { if (e.email) emailToName[e.email.toLowerCase()] = e.name; });
+  // We don't have a direct user_id → engineer mapping, but auth.users.id should match engineer email's user
+  // Fallback: just show actor_user_id as a partial UUID, plus actor_label which is human-readable for system actions
+
+  const actionPill = (a) => {
+    const cls = a === 'insert' ? 'pill-green'
+      : a === 'soft_delete' ? 'pill-red'
+      : a === 'undelete' ? 'pill-blue'
+      : a === 'delete' ? 'pill-red'
+      : 'pill-gray';
+    return `<span class="pill ${cls}">${escapeHtml(a)}</span>`;
+  };
+
+  const summarizeChange = (oldV, newV) => {
+    if (!oldV && newV) return Object.keys(newV).slice(0, 3).map(k => `${k}=${JSON.stringify(newV[k])?.slice(0, 30)}`).join(', ');
+    if (oldV && !newV) return '(deleted)';
+    if (!oldV || !newV) return '';
+    const diffs = [];
+    for (const k of Object.keys(newV)) {
+      if (k === 'updated_at' || k === 'created_at') continue;
+      if (JSON.stringify(oldV[k]) !== JSON.stringify(newV[k])) {
+        const o = JSON.stringify(oldV[k])?.slice(0, 30) || 'null';
+        const n = JSON.stringify(newV[k])?.slice(0, 30) || 'null';
+        diffs.push(`${k}: ${o} → ${n}`);
+      }
+    }
+    return diffs.slice(0, 4).join('; ') || '(no value diff)';
+  };
+
+  root.innerHTML = `
+    <div class="panel">
+      <h2>Audit log</h2>
+      <p style="color: var(--muted); font-size: 11px; margin-top: -8px;">Last 100 changes to projects and work entries. Most recent first.</p>
+      <table>
+        <thead>
+          <tr><th>When</th><th>Table</th><th>Action</th><th>Record</th><th>Actor</th><th>Change</th></tr>
+        </thead>
+        <tbody>
+          ${(logs || []).map(l => {
+            const actorDisplay = l.actor_label
+              ? escapeHtml(l.actor_label)
+              : l.actor_user_id ? `<span style="font-family: monospace; font-size: 10px;">${escapeHtml(l.actor_user_id.slice(0, 8))}</span>`
+              : '<span style="color: var(--muted);">system</span>';
+            return `
+              <tr>
+                <td style="font-size: 11px; color: var(--muted); white-space: nowrap;">${escapeHtml(fmtDateTime(l.changed_at))}</td>
+                <td style="font-family: monospace; font-size: 11px;">${escapeHtml(l.table_name)}</td>
+                <td>${actionPill(l.action)}</td>
+                <td style="font-family: monospace; font-size: 10px;" title="${escapeHtml(l.record_id)}">${escapeHtml(l.record_id.slice(0, 8))}…</td>
+                <td style="font-size: 11px;">${actorDisplay}</td>
+                <td style="font-size: 11px; max-width: 400px; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(summarizeChange(l.old_values, l.new_values))}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 async function openManageTeamModal(projectId) {
