@@ -1042,7 +1042,59 @@ async function renderManage() {
     `).neq('status', 'deleted').neq('status', 'pending_confirmation').order('project_code');
   if (projErr) { console.error('Projects query failed:', projErr); toast('Failed to load projects: ' + projErr.message, 'error'); }
 
+  // Pending POs awaiting confirmation (Step B2)
+  const { data: pendingPOs, error: pendingErr } = await sb.from('pending_po_creations')
+    .select('*')
+    .eq('status', 'pending')
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false });
+  if (pendingErr) { console.error('Pending POs query failed:', pendingErr); }
+
   root.innerHTML = `
+    ${(pendingPOs && pendingPOs.length > 0) ? `
+    <div class="panel" style="border-left: 3px solid var(--yellow);">
+      <h2>Pending POs <span style="font-size: 12px; font-weight: normal; color: var(--muted);">(${pendingPOs.length} awaiting confirmation)</span></h2>
+      <p style="color: var(--muted); font-size: 11px; margin-top: -8px;">Auto-extracted from forwarded PO emails. Activate to create the project. Cowork polls twice daily; expires in 7 days.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Token</th><th>Forwarder</th><th>Subject</th><th>Proposed code</th>
+            <th>SI / EU</th><th>Value</th><th>MDs (O / C)</th><th>Warnings</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${pendingPOs.map(po => {
+            const warnings = (po.extraction_warnings || []);
+            const warningHtml = warnings.length > 0
+              ? warnings.map(w => `<span class="pill pill-yellow" style="font-size: 10px;">${escapeHtml(w)}</span>`).join(' ')
+              : '<span style="color: var(--muted); font-size: 11px;">—</span>';
+            const eu = po.proposed_eu_name ? escapeHtml(po.proposed_eu_name) : '<span style="color: var(--muted);">—</span>';
+            const si = po.proposed_si_name ? escapeHtml(po.proposed_si_name) : '<span style="color: var(--red);">missing</span>';
+            const value = po.proposed_price_ps !== null ? 'S$' + Number(po.proposed_price_ps).toLocaleString() : '—';
+            const mds = `${po.proposed_office_md ?? '?'} / ${po.proposed_cutover_md ?? '?'}`;
+            return `
+              <tr>
+                <td style="font-family: monospace; font-size: 10px;">${escapeHtml(po.token)}</td>
+                <td style="font-size: 11px;">${escapeHtml(po.forwarded_by_email)}</td>
+                <td style="font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(po.raw_subject || '')}">${escapeHtml(po.raw_subject || '—')}</td>
+                <td style="font-family: monospace; font-size: 11px;">${escapeHtml(po.proposed_project_code || '—')}</td>
+                <td style="font-size: 11px;">${si}<br><span style="color: var(--muted);">→ ${eu}</span></td>
+                <td style="font-size: 11px;">${value}</td>
+                <td style="font-size: 11px;">${mds}</td>
+                <td>${warningHtml}</td>
+                <td>
+                  <button class="small secondary po-edit-btn" data-token="${escapeHtml(po.token)}">Edit & Activate</button>
+                  <button class="small po-activate-btn" data-token="${escapeHtml(po.token)}">Activate</button>
+                  <button class="small danger po-reject-btn" data-token="${escapeHtml(po.token)}">Reject</button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    ` : ''}
+
     <div class="panel">
       <h2>Add engineer</h2>
       <div class="row-form">
@@ -1249,6 +1301,45 @@ async function renderManage() {
       await renderManage();
     });
   });
+
+  // Pending PO actions (Step B2)
+  document.querySelectorAll('.po-activate-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const token = btn.dataset.token;
+      if (!confirm(`Activate PO ${token}? The project will be created with the extracted values as-is.`)) return;
+      btn.disabled = true; btn.textContent = '…';
+      const { error } = await sb.rpc('rpc_confirm_pending_po', { p_token: token });
+      if (error) {
+        toast('Activation failed: ' + error.message, 'error');
+        btn.disabled = false; btn.textContent = 'Activate';
+        return;
+      }
+      toast('Project created from PO.', 'success');
+      await renderManage();
+    });
+  });
+
+  document.querySelectorAll('.po-reject-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const token = btn.dataset.token;
+      const reason = prompt(`Reject PO ${token}? (e.g. duplicate, wrong forward, customer cancelled)\n\nReason:`);
+      if (reason === null) return;
+      const { error } = await sb.rpc('rpc_reject_pending_po', {
+        p_token: token,
+        p_reason: reason.trim() || null
+      });
+      if (error) { toast('Reject failed: ' + error.message, 'error'); return; }
+      toast('PO rejected.', 'success');
+      await renderManage();
+    });
+  });
+
+  document.querySelectorAll('.po-edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const po = (pendingPOs || []).find(p => p.token === btn.dataset.token);
+      if (po) openConfirmPOModal(po, customers || []);
+    });
+  });
 }
 
 function openEditProjectModal(project, customers) {
@@ -1339,6 +1430,102 @@ function openEditProjectModal(project, customers) {
       return;
     }
     toast('Project updated.', 'success');
+    c.innerHTML = '';
+    await renderManage();
+  });
+}
+
+function openConfirmPOModal(po, customers) {
+  if (!isManager) return;
+  const c = document.getElementById('modal-container');
+  const customerOpts = (customers || []).map(cu =>
+    `<option value="${cu.id}">${escapeHtml(cu.name)}</option>`
+  ).join('');
+  const warnings = (po.extraction_warnings || []);
+  const warningHtml = warnings.length > 0
+    ? '<div style="background: rgba(210,153,34,0.1); border: 1px solid var(--yellow); padding: 8px; border-radius: 4px; margin-bottom: 12px; font-size: 11px;">⚠ ' + warnings.map(w => escapeHtml(w)).join('; ') + '</div>'
+    : '';
+
+  c.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal" style="min-width: 520px;">
+        <h3>Edit & Activate PO</h3>
+        <div style="color: var(--muted); font-size: 11px; margin-bottom: 8px;">
+          <span class="badge">${escapeHtml(po.token)}</span>
+          forwarded by ${escapeHtml(po.forwarded_by_email)}<br>
+          ${po.raw_subject ? 'Subject: ' + escapeHtml(po.raw_subject) + '<br>' : ''}
+          ${po.proposed_quote_ref ? 'Quote ref: ' + escapeHtml(po.proposed_quote_ref) + '<br>' : ''}
+          ${po.description_summary ? '<span style="font-style: italic;">' + escapeHtml(po.description_summary) + '</span>' : ''}
+        </div>
+        ${warningHtml}
+        <div class="modal-row">
+          <label>Project code</label>
+          <input type="text" id="cp-code" value="${escapeHtml(po.proposed_project_code || '')}" placeholder="e.g. ptc-sbst-clearpass">
+        </div>
+        <div class="modal-row">
+          <label>Project name</label>
+          <input type="text" id="cp-name" value="${escapeHtml(po.proposed_project_name || '')}">
+        </div>
+        <div class="modal-row">
+          <label>Customer (SI)</label>
+          <select id="cp-customer">
+            <option value="">— none —</option>
+            ${customerOpts}
+          </select>
+          ${po.proposed_si_name && !po.proposed_si_customer_id ? `<span style="font-size: 10px; color: var(--yellow); margin-top: 2px;">Extracted "${escapeHtml(po.proposed_si_name)}" — no DB match. Pick or create customer first.</span>` : ''}
+        </div>
+        <div class="modal-row">
+          <label>End user (EU)</label>
+          <select id="cp-enduser">
+            <option value="">— none —</option>
+            ${customerOpts}
+          </select>
+          ${po.proposed_eu_name && !po.proposed_eu_customer_id ? `<span style="font-size: 10px; color: var(--muted); margin-top: 2px;">Extracted "${escapeHtml(po.proposed_eu_name)}" — no DB match.</span>` : ''}
+        </div>
+        <div class="modal-row">
+          <label>Office MDs</label>
+          <input type="number" id="cp-office-md" step="0.5" min="0" value="${po.proposed_office_md ?? 0}">
+        </div>
+        <div class="modal-row">
+          <label>Cutover MDs</label>
+          <input type="number" id="cp-cutover-md" step="0.5" min="0" value="${po.proposed_cutover_md ?? 0}">
+        </div>
+        <div class="modal-row">
+          <label>PS price (SGD)</label>
+          <input type="number" id="cp-price" step="100" min="0" value="${po.proposed_price_ps ?? ''}">
+        </div>
+        <div class="modal-actions">
+          <button id="cp-cancel" class="secondary">Cancel</button>
+          <button id="cp-save">Activate</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (po.proposed_si_customer_id) document.getElementById('cp-customer').value = po.proposed_si_customer_id;
+  if (po.proposed_eu_customer_id) document.getElementById('cp-enduser').value = po.proposed_eu_customer_id;
+
+  document.getElementById('cp-cancel').addEventListener('click', () => { c.innerHTML = ''; });
+  document.getElementById('cp-save').addEventListener('click', async () => {
+    const btn = document.getElementById('cp-save');
+    btn.disabled = true; btn.textContent = 'Activating…';
+    const priceRaw = document.getElementById('cp-price').value;
+    const { error } = await sb.rpc('rpc_confirm_pending_po', {
+      p_token: po.token,
+      p_project_code: document.getElementById('cp-code').value.trim() || null,
+      p_project_name: document.getElementById('cp-name').value.trim() || null,
+      p_customer_id: document.getElementById('cp-customer').value || null,
+      p_end_user_id: document.getElementById('cp-enduser').value || null,
+      p_quoted_office_mandays: parseFloat(document.getElementById('cp-office-md').value) || 0,
+      p_quoted_cutover_mandays: parseFloat(document.getElementById('cp-cutover-md').value) || 0,
+      p_price_ps: priceRaw === '' ? null : parseFloat(priceRaw)
+    });
+    if (error) {
+      toast('Activation failed: ' + error.message, 'error');
+      btn.disabled = false; btn.textContent = 'Activate';
+      return;
+    }
+    toast('Project created from PO.', 'success');
     c.innerHTML = '';
     await renderManage();
   });
