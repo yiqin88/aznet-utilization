@@ -484,11 +484,21 @@ async function renderMySchedule() {
   const { data: connStatus } = await sb.rpc('rpc_my_calendar_status');
   const conn = (connStatus && connStatus[0]) || null;
 
-  const { data: entries, error: entriesErr } = await sb.from('work_entries')
+  // Date scope: default 30 days. Engineers can pick 30 or 90; managers also get 180 + all.
+  const ENTRY_LIMIT = 200;
+  let entriesQuery = sb.from('work_entries')
     .select('*, projects(project_code, name), customers:customer_id(name)')
     .eq('engineer_id', currentEngineer.id)
-    .order('start_at', { ascending: false }).limit(50);
+    .order('start_at', { ascending: false })
+    .limit(ENTRY_LIMIT);
+  if (_mySchedScope !== 'all') {
+    const days = parseInt(_mySchedScope, 10);
+    const cutoff = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+    entriesQuery = entriesQuery.gte('start_at', cutoff);
+  }
+  const { data: entries, error: entriesErr } = await entriesQuery;
   if (entriesErr) { console.error('Entries query failed:', entriesErr); toast('Failed to load entries: ' + entriesErr.message, 'error'); }
+  const overflowed = (entries || []).length >= ENTRY_LIMIT;
 
   root.innerHTML = `
     <div class="panel">
@@ -536,17 +546,35 @@ async function renderMySchedule() {
     </div>
 
     <div class="panel">
-      <div style="display:flex; justify-content: space-between; align-items: center;">
-        <h2>My entries</h2>
-        <div>
-          <label style="color: var(--muted); font-size: 12px;">Show:</label>
-          <select id="entries-filter">
-            <option value="all">All</option>
-            <option value="unmatched">Unmatched only</option>
-            <option value="unconfirmed">Not yet reviewed</option>
-          </select>
+      <div style="display:flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <h2 style="margin: 0;">My entries</h2>
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <div>
+            <label style="color: var(--muted); font-size: 12px;">Scope:</label>
+            <select id="entries-scope">
+              <option value="30" ${_mySchedScope==='30'?'selected':''}>Last 30 days</option>
+              <option value="90" ${_mySchedScope==='90'?'selected':''}>Last 90 days</option>
+              ${isManager ? `
+                <option value="180" ${_mySchedScope==='180'?'selected':''}>Last 6 months</option>
+                <option value="all" ${_mySchedScope==='all'?'selected':''}>All time</option>
+              ` : ''}
+            </select>
+          </div>
+          <div>
+            <label style="color: var(--muted); font-size: 12px;">Show:</label>
+            <select id="entries-filter">
+              <option value="all">All</option>
+              <option value="unmatched">Unmatched only</option>
+              <option value="unconfirmed">Not yet reviewed</option>
+            </select>
+          </div>
         </div>
       </div>
+      ${overflowed ? `
+        <div style="margin-top: 8px; padding: 8px 10px; background: rgba(210,153,34,0.1); border: 1px solid var(--yellow); border-radius: 4px; font-size: 11px;">
+          ⚠ Showing the most recent ${ENTRY_LIMIT} entries. There may be more — narrow the scope to see all.
+        </div>
+      ` : ''}
       <table>
         <thead>
           <tr>
@@ -599,6 +627,10 @@ async function renderMySchedule() {
   });
 
   document.getElementById('entries-filter').addEventListener('change', () => renderEntriesTable(entries));
+  document.getElementById('entries-scope').addEventListener('change', (e) => {
+    _mySchedScope = e.target.value;
+    renderMySchedule();
+  });
   renderEntriesTable(entries);
 }
 
@@ -743,12 +775,24 @@ function startMsCalendarOAuth() {
   window.location.href = `https://login.microsoftonline.com/${MS_TENANT_ID}/oauth2/v2.0/authorize?${params}`;
 }
 
+// Team Week navigation state. Offset = weeks from current week.
+// Bounds: engineers see -4 to +8; managers see -52 to +8.
+let _teamWeekOffset = 0;
+function _teamWeekBounds() {
+  return { back: isManager ? -52 : -4, forward: 8 };
+}
+
+// My Schedule date scope. Engineers: 30/90 days. Managers also get 180/all.
+let _mySchedScope = '30';
+
 async function renderTeamWeek() {
   const root = document.getElementById('view-team-week');
   const today = new Date();
   const monday = new Date(today);
   monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
   monday.setHours(0,0,0,0);
+  // Apply navigation offset
+  monday.setDate(monday.getDate() + (_teamWeekOffset * 7));
   const sunday = new Date(monday); sunday.setDate(monday.getDate() + 7);
 
   const { data: engineers } = await sb.from('engineers').select('*').eq('active', true).order('name');
@@ -779,10 +823,27 @@ async function renderTeamWeek() {
     (cells[key] = cells[key] || []).push(e);
   });
 
+  const _twBounds = _teamWeekBounds();
+  const canPrev = _teamWeekOffset > _twBounds.back;
+  const canNext = _teamWeekOffset < _twBounds.forward;
+  const offsetLabel = _teamWeekOffset === 0 ? 'This week'
+    : _teamWeekOffset === -1 ? 'Last week'
+    : _teamWeekOffset === 1 ? 'Next week'
+    : _teamWeekOffset < 0 ? `${Math.abs(_teamWeekOffset)} weeks ago`
+    : `${_teamWeekOffset} weeks ahead`;
+
   root.innerHTML = `
     <div class="panel">
-      <h2>Team Week — ${fmtDate(monday.toISOString())} to ${fmtDate(new Date(sunday-1).toISOString())}</h2>
-      <p style="color: var(--muted); font-size: 11px; margin-top: -8px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+        <h2 style="margin: 0;">Team Week — ${fmtDate(monday.toISOString())} to ${fmtDate(new Date(sunday-1).toISOString())}</h2>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <button class="small secondary" id="tw-prev" ${canPrev ? '' : 'disabled style="opacity:0.4;cursor:not-allowed;"'}>◀ Prev</button>
+          <button class="small secondary" id="tw-today" ${_teamWeekOffset === 0 ? 'disabled style="opacity:0.4;cursor:not-allowed;"' : ''}>Today</button>
+          <button class="small secondary" id="tw-next" ${canNext ? '' : 'disabled style="opacity:0.4;cursor:not-allowed;"'}>Next ▶</button>
+          <span style="font-size: 11px; color: var(--muted); margin-left: 8px;">${escapeHtml(offsetLabel)}</span>
+        </div>
+      </div>
+      <p style="color: var(--muted); font-size: 11px; margin-top: 6px;">
         ↔ Swipe horizontally to see all 7 days${isManager ? ' · Tap any entry to flag/reject' : ''}
       </p>
       <div class="week-grid-wrap">
@@ -816,6 +877,20 @@ async function renderTeamWeek() {
       </div>
     </div>
   `;
+
+  // Wire navigation buttons
+  const prevBtn = document.getElementById('tw-prev');
+  const todayBtn = document.getElementById('tw-today');
+  const nextBtn = document.getElementById('tw-next');
+  if (prevBtn) prevBtn.addEventListener('click', () => {
+    if (_teamWeekOffset > _twBounds.back) { _teamWeekOffset--; renderTeamWeek(); }
+  });
+  if (todayBtn) todayBtn.addEventListener('click', () => {
+    if (_teamWeekOffset !== 0) { _teamWeekOffset = 0; renderTeamWeek(); }
+  });
+  if (nextBtn) nextBtn.addEventListener('click', () => {
+    if (_teamWeekOffset < _twBounds.forward) { _teamWeekOffset++; renderTeamWeek(); }
+  });
 
   // Wire click-to-review for managers (Step 26b)
   if (isManager) {
