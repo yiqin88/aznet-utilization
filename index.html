@@ -1116,7 +1116,7 @@ async function renderManage() {
   const { data: projects, error: projErr } = await sb.from('projects')
     .select(`
       id, project_code, name, status, full_tag, customer_id, end_user_id,
-      quoted_office_mandays, quoted_cutover_mandays, price_ps, source,
+      quoted_office_mandays, quoted_cutover_mandays, price_ps, source, po_number,
       customer:customer_id(id, name),
       end_user:end_user_id(id, name),
       project_engineers(engineer_id, is_lead, engineers!project_engineers_engineer_id_fkey(id, name))
@@ -1140,7 +1140,7 @@ async function renderManage() {
         <thead>
           <tr>
             <th>Token</th><th>Forwarder</th><th>Subject</th><th>Proposed code</th>
-            <th>SI / EU</th><th>Value</th><th>MDs (O / C)</th><th>Warnings</th><th></th>
+            <th>PO #</th><th>SI / EU</th><th>Value</th><th>MDs (O / C)</th><th>Warnings</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -1153,12 +1153,14 @@ async function renderManage() {
             const si = po.proposed_si_name ? escapeHtml(po.proposed_si_name) : '<span style="color: var(--red);">missing</span>';
             const value = po.proposed_price_ps !== null ? 'S$' + Number(po.proposed_price_ps).toLocaleString() : '—';
             const mds = `${po.proposed_office_md ?? '?'} / ${po.proposed_cutover_md ?? '?'}`;
+            const poNum = po.proposed_po_number ? escapeHtml(po.proposed_po_number) : '<span style="color: var(--muted);">—</span>';
             return `
               <tr>
                 <td style="font-family: monospace; font-size: 10px;">${escapeHtml(po.token)}</td>
                 <td style="font-size: 11px;">${escapeHtml(po.forwarded_by_email)}</td>
                 <td style="font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(po.raw_subject || '')}">${escapeHtml(po.raw_subject || '—')}</td>
                 <td style="font-family: monospace; font-size: 11px;">${escapeHtml(po.proposed_project_code || '—')}</td>
+                <td style="font-family: monospace; font-size: 11px;">${poNum}</td>
                 <td style="font-size: 11px;">${si}<br><span style="color: var(--muted);">→ ${eu}</span></td>
                 <td style="font-size: 11px;">${value}</td>
                 <td style="font-size: 11px;">${mds}</td>
@@ -1245,6 +1247,7 @@ async function renderManage() {
         <input type="number" id="proj-office-md" placeholder="Office MDs" step="0.5" min="0" style="max-width: 110px;">
         <input type="number" id="proj-cutover-md" placeholder="Cutover MDs" step="0.5" min="0" style="max-width: 120px;">
         <input type="number" id="proj-price" placeholder="PS price (SGD)" step="100" min="0" style="max-width: 140px;">
+        <input type="text" id="proj-po" placeholder="PO number (optional)" style="max-width: 180px;">
         <button id="proj-add">Create project</button>
       </div>
       <table>
@@ -1330,6 +1333,7 @@ async function renderManage() {
     const cutoverMd = parseFloat(document.getElementById('proj-cutover-md').value) || 0;
     const priceRaw = document.getElementById('proj-price').value;
     const price = priceRaw === '' ? null : parseFloat(priceRaw);
+    const poNumber = document.getElementById('proj-po').value.trim() || null;
     const { error } = await sb.rpc('rpc_create_project', {
       p_project_code: code,
       p_customer_id: document.getElementById('proj-customer').value || null,
@@ -1337,7 +1341,8 @@ async function renderManage() {
       p_quoted_office_mandays: officeMd,
       p_quoted_cutover_mandays: cutoverMd,
       p_price_ps: price,
-      p_end_user_id: document.getElementById('proj-enduser').value || null
+      p_end_user_id: document.getElementById('proj-enduser').value || null,
+      p_po_number: poNumber
     });
     if (error) { toast(error.message, 'error'); return; }
     toast('Project created.', 'success');
@@ -1470,6 +1475,10 @@ function openEditProjectModal(project, customers) {
           <input type="number" id="ep-price" step="100" min="0" value="${project.price_ps ?? ''}">
         </div>
         <div class="modal-row">
+          <label>PO number</label>
+          <input type="text" id="ep-po" placeholder="(optional)" value="${escapeHtml(project.po_number ?? '')}">
+        </div>
+        <div class="modal-row">
           <label>Status</label>
           <select id="ep-status">
             <option value="active" ${project.status==='active'?'selected':''}>Active</option>
@@ -1495,6 +1504,8 @@ function openEditProjectModal(project, customers) {
     const btn = document.getElementById('ep-save');
     btn.disabled = true; btn.textContent = 'Saving…';
     const priceRaw = document.getElementById('ep-price').value;
+    // PO: send the trimmed value (empty string clears, real value sets).
+    const poRaw = document.getElementById('ep-po').value.trim();
     const { error } = await sb.rpc('rpc_update_project', {
       p_project_id: project.id,
       p_project_name: document.getElementById('ep-name').value.trim() || null,
@@ -1503,7 +1514,8 @@ function openEditProjectModal(project, customers) {
       p_quoted_office_mandays: parseFloat(document.getElementById('ep-office-md').value) || 0,
       p_quoted_cutover_mandays: parseFloat(document.getElementById('ep-cutover-md').value) || 0,
       p_price_ps: priceRaw === '' ? null : parseFloat(priceRaw),
-      p_status: document.getElementById('ep-status').value
+      p_status: document.getElementById('ep-status').value,
+      p_po_number: poRaw  // sent as '' when cleared, real value when set
     });
     if (error) {
       toast('Update failed: ' + error.message, 'error');
@@ -1575,6 +1587,10 @@ function openConfirmPOModal(po, customers) {
           <label>PS price (SGD)</label>
           <input type="number" id="cp-price" step="100" min="0" value="${po.proposed_price_ps ?? ''}">
         </div>
+        <div class="modal-row">
+          <label>PO number</label>
+          <input type="text" id="cp-po" placeholder="(optional)" value="${escapeHtml(po.proposed_po_number ?? '')}">
+        </div>
         <div class="modal-actions">
           <button id="cp-cancel" class="secondary">Cancel</button>
           <button id="cp-save">Activate</button>
@@ -1591,6 +1607,7 @@ function openConfirmPOModal(po, customers) {
     const btn = document.getElementById('cp-save');
     btn.disabled = true; btn.textContent = 'Activating…';
     const priceRaw = document.getElementById('cp-price').value;
+    const poRaw = document.getElementById('cp-po').value.trim() || null;
     const { error } = await sb.rpc('rpc_confirm_pending_po', {
       p_token: po.token,
       p_project_code: document.getElementById('cp-code').value.trim() || null,
@@ -1599,7 +1616,8 @@ function openConfirmPOModal(po, customers) {
       p_end_user_id: document.getElementById('cp-enduser').value || null,
       p_quoted_office_mandays: parseFloat(document.getElementById('cp-office-md').value) || 0,
       p_quoted_cutover_mandays: parseFloat(document.getElementById('cp-cutover-md').value) || 0,
-      p_price_ps: priceRaw === '' ? null : parseFloat(priceRaw)
+      p_price_ps: priceRaw === '' ? null : parseFloat(priceRaw),
+      p_po_number: poRaw
     });
     if (error) {
       toast('Activation failed: ' + error.message, 'error');
@@ -1693,6 +1711,7 @@ async function renderUtilisation() {
           <tr>
             <th>Project</th>
             <th>Customer</th>
+            <th>PO #</th>
             <th>Office MD<br><span style="font-weight: normal; color: var(--muted); font-size: 10px;">logged / quoted</span></th>
             <th>Cutover MD<br><span style="font-weight: normal; color: var(--muted); font-size: 10px;">logged / quoted</span></th>
             <th>% used</th>
@@ -1703,7 +1722,7 @@ async function renderUtilisation() {
         </thead>
         <tbody>
           ${filtered.length === 0 ? `
-            <tr><td colspan="8" style="text-align: center; color: var(--muted); padding: 24px;">No projects match the current filter.</td></tr>
+            <tr><td colspan="9" style="text-align: center; color: var(--muted); padding: 24px;">No projects match the current filter.</td></tr>
           ` : filtered.map(r => {
             const officeBar = renderUtilBar(r.office_md_logged, r.quoted_office_md);
             const cutoverBar = renderUtilBar(r.cutover_md_logged, r.quoted_cutover_md);
@@ -1715,6 +1734,7 @@ async function renderUtilisation() {
             const pctLabel = pct === null ? '—' : pct.toFixed(1) + '%';
             const lastEntry = r.last_entry_at ? fmtDate(r.last_entry_at) : '<span style="color: var(--muted);">never</span>';
             const statusCls = r.status==='active'?'green':r.status==='completed'?'blue':'gray';
+            const poNum = r.po_number ? escapeHtml(r.po_number) : '<span style="color: var(--muted);">—</span>';
             return `
               <tr>
                 <td>
@@ -1722,6 +1742,7 @@ async function renderUtilisation() {
                   <br><span style="font-size: 11px; color: var(--muted);">${escapeHtml(r.name || '—')}</span>
                 </td>
                 <td style="font-size: 11px;">${escapeHtml(r.customer_name || '—')}${r.end_user_name && r.end_user_name !== r.customer_name ? `<br><span style="color: var(--muted);">→ ${escapeHtml(r.end_user_name)}</span>` : ''}</td>
+                <td style="font-family: monospace; font-size: 11px;">${poNum}</td>
                 <td>${officeBar}</td>
                 <td>${cutoverBar}</td>
                 <td><strong style="color: ${pctColor}; font-size: 14px;">${pctLabel}</strong></td>
