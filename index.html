@@ -623,7 +623,7 @@ async function renderMySchedule() {
       p_entry_type: type,
       p_project_id: project || null,
       p_is_cutover: cutover,
-      p_raw_title: title || null
+      p_notes: title || null
     });
     if (error) { toast(error.message, 'error'); return; }
     toast('Saved.', 'success');
@@ -1358,40 +1358,52 @@ async function renderManage() {
     </div>
 
     <div class="panel">
-      <h2>Projects <span id="projects-filter-count" style="font-size: 12px; font-weight: normal; color: var(--muted);"></span></h2>
-      <div class="row-form">
-        <input type="text" id="proj-code" placeholder="Code (without aznet- prefix, e.g. mandai-itpkg1)">
-        <select id="proj-customer"><option value="">SI customer (Invoiced)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
-        <select id="proj-enduser"><option value="">End user (Beneficiary)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
-        <input type="text" id="proj-name" placeholder="Name (e.g. Mandai IT Infra Pkg 1)">
-        <input type="number" id="proj-office-md" placeholder="Office MDs" step="0.5" min="0" style="max-width: 110px;">
-        <input type="number" id="proj-cutover-md" placeholder="Cutover MDs" step="0.5" min="0" style="max-width: 120px;">
-        <input type="number" id="proj-price" placeholder="PS price (SGD)" step="100" min="0" style="max-width: 140px;">
-        <input type="text" id="proj-po" placeholder="PO number (optional)" style="max-width: 180px;">
-        <button id="proj-add">Create project</button>
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+        <h2 style="margin: 0; flex: 1;">Projects <span id="projects-filter-count" style="font-size: 12px; font-weight: normal; color: var(--muted);"></span></h2>
+        <button id="create-project-toggle" class="small secondary">+ New project</button>
       </div>
-      <div class="row-form" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border, #2a2a2a);">
-        <input type="text" id="filter-proj-name" placeholder="Filter by name or code…" style="max-width: 220px;">
-        <select id="filter-proj-customer">
-          <option value="">All SI customers</option>
-          ${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
-        </select>
-        <select id="filter-proj-enduser">
-          <option value="">All end users</option>
-          ${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
-        </select>
-        <select id="filter-proj-engineer">
-          <option value="">All engineers</option>
-          ${(engineers || []).map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('')}
-        </select>
-        <select id="filter-proj-status" style="max-width: 140px;">
-          <option value="active">Active</option>
-          <option value="completed">Completed</option>
-          <option value="cancelled">Cancelled</option>
-          <option value="">All statuses</option>
-        </select>
-        <button id="filter-proj-clear" class="small secondary">Clear filters</button>
+
+      <div id="create-project-section" style="display: none; padding: 14px; background: var(--panel-2); border-radius: 6px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; font-weight: 500;">Create new project</div>
+        <div class="row-form" style="margin-bottom: 0;">
+          <input type="text" id="proj-code" placeholder="Code (without aznet- prefix, e.g. mandai-itpkg1)">
+          <select id="proj-customer"><option value="">SI customer (Invoiced)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
+          <select id="proj-enduser"><option value="">End user (Beneficiary)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
+          <input type="text" id="proj-name" placeholder="Name (e.g. Mandai IT Infra Pkg 1)">
+          <input type="number" id="proj-office-md" placeholder="Office MDs" step="0.5" min="0" style="max-width: 110px;">
+          <input type="number" id="proj-cutover-md" placeholder="Cutover MDs" step="0.5" min="0" style="max-width: 120px;">
+          <input type="number" id="proj-price" placeholder="PS price (SGD)" step="100" min="0" style="max-width: 140px;">
+          <input type="text" id="proj-po" placeholder="PO number (optional)" style="max-width: 180px;">
+          <button id="proj-add">Create project</button>
+        </div>
       </div>
+
+      <div style="margin-bottom: 12px;">
+        <div style="font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; font-weight: 500;">Filter</div>
+        <div class="row-form" style="margin-bottom: 0;">
+          <input type="text" id="filter-proj-name" placeholder="Filter by name or code…" style="max-width: 220px;">
+          <select id="filter-proj-customer">
+            <option value="">All SI customers</option>
+            ${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+          </select>
+          <select id="filter-proj-enduser">
+            <option value="">All end users</option>
+            ${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+          </select>
+          <select id="filter-proj-engineer">
+            <option value="">All engineers</option>
+            ${(engineers || []).map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('')}
+          </select>
+          <select id="filter-proj-status" style="max-width: 140px;">
+            <option value="active">Active</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="">All statuses</option>
+          </select>
+          <button id="filter-proj-clear" class="small secondary">Clear filters</button>
+        </div>
+      </div>
+
       <table>
         <thead>
           <tr><th>Code</th><th>Name</th><th>Customer (SI)</th><th>End User</th><th>Team</th><th>Status</th><th></th></tr>
@@ -1464,6 +1476,15 @@ async function renderManage() {
   });
 
   // ---- Projects table: populate cache and wire filters ----
+  // Toggle for the (collapsed by default) Create new project section.
+  document.getElementById('create-project-toggle')?.addEventListener('click', () => {
+    const section = document.getElementById('create-project-section');
+    const btn = document.getElementById('create-project-toggle');
+    if (!section || !btn) return;
+    const isHidden = section.style.display === 'none';
+    section.style.display = isHidden ? 'block' : 'none';
+    btn.textContent = isHidden ? '− Hide form' : '+ New project';
+  });
   _projectsCache = {
     projects: projects || [],
     customers: customers || [],
