@@ -586,7 +586,7 @@ async function renderMySchedule() {
       <table>
         <thead>
           <tr>
-            <th>When</th><th>Event</th><th>Customer (SI)</th><th>Project</th><th>Hours</th><th>Source</th><th>Status</th><th></th>
+            <th>When</th><th>Event</th><th>Customer (SI)</th><th>Project / Maint.</th><th>Hours</th><th>Source</th><th>Status</th><th></th>
           </tr>
         </thead>
         <tbody id="my-entries-body"></tbody>
@@ -651,11 +651,25 @@ function renderEntriesTable(entries) {
   tbody.innerHTML = rows.map(e => {
     const proj = e.projects;
     const cust = e.customers;
+    // Build the Project / Maintenance cell:
+    //   - PM/CM entries: show maintenance badge, and project code too if linked
+    //   - Project entries: show project code
+    //   - Other types (leave/admin/etc.): em dash
+    let projMaintCell = '—';
+    if (e.entry_type === 'pm' || e.entry_type === 'cm') {
+      const tag = e.entry_type.toUpperCase();
+      const tagColor = e.entry_type === 'pm' ? 'var(--accent)' : 'var(--yellow)';
+      const tagBg = e.entry_type === 'pm' ? 'rgba(76,194,255,0.2)' : 'rgba(210,153,34,0.2)';
+      const projTail = proj ? ` <span class="badge">${escapeHtml(proj.project_code)}</span>` : '';
+      projMaintCell = `<span class="badge" style="background: ${tagBg}; color: ${tagColor}; font-weight: 700;">${tag}</span>${projTail}`;
+    } else if (proj) {
+      projMaintCell = `<span class="badge">${escapeHtml(proj.project_code)}</span>`;
+    }
     return `<tr>
       <td>${e.confirmed ? '<span style="color: var(--green); margin-right: 4px;" title="Reviewed">✓</span>' : ''}${escapeHtml(fmtDateTime(e.start_at))}</td>
       <td>${escapeHtml(e.raw_title || '—')} ${e.is_cutover ? '<span class="pill pill-purple">cutover</span>' : ''}</td>
       <td>${cust ? escapeHtml(cust.name) : '—'}</td>
-      <td>${proj ? `<span class="badge">${escapeHtml(proj.project_code)}</span>` : '—'}</td>
+      <td>${projMaintCell}</td>
       <td>${hoursBetween(e.start_at, e.end_at)}</td>
       <td><span class="pill pill-gray">${escapeHtml(e.source)}</span></td>
       <td>${e.match_status === 'matched'
@@ -1072,21 +1086,38 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
   const currentCustomerId = entry.customer_id || '';
 
   // Source provenance block — managers want to see whether an entry came from
-  // calendar sync (and from whom, to whom) or was manually entered.
+  // calendar sync (and whether the engineer created it themselves vs. was invited)
+  // or was manually entered.
   let sourceBlockHtml = '';
   if (entry.source === 'calendar_sync') {
-    const organizer = entry.organizer_email
-      ? escapeHtml(entry.organizer_email)
-      : '<span style="color: var(--muted); font-style: italic;">unknown</span>';
-    const domains = Array.isArray(entry.attendee_domains) && entry.attendee_domains.length > 0
-      ? entry.attendee_domains.map(d => `<span class="badge" style="margin-right: 4px;">${escapeHtml(d)}</span>`).join('')
-      : '<span style="color: var(--muted); font-style: italic;">none recorded</span>';
+    const orgEmail = entry.organizer_email || '';
+    const engineerEmail = (engineersById?.[entry.engineer_id]?.email || '').toLowerCase();
+    const orgEmailLower = orgEmail.toLowerCase();
+    const isSelfCreated = orgEmail && engineerEmail && orgEmailLower === engineerEmail;
+    const hasOrgEmail = !!orgEmail;
+    const domains = Array.isArray(entry.attendee_domains) ? entry.attendee_domains : [];
+    const hasAttendees = domains.length > 0;
+
+    let sourceLine;
+    if (!hasOrgEmail) {
+      sourceLine = `<span style="color: var(--muted); font-style: italic;">organizer not yet recorded — next sync will populate</span>`;
+    } else if (isSelfCreated) {
+      const flavour = hasAttendees
+        ? `Self-created in Outlook by ${escapeHtml(engName)} · invited others`
+        : `Self-scheduled in Outlook by ${escapeHtml(engName)} · no invitees`;
+      sourceLine = `<span style="color: var(--text);">${flavour}</span>`;
+    } else {
+      sourceLine = `<span style="color: var(--muted);">Invited by</span> <span style="color: var(--text);">${escapeHtml(orgEmail)}</span>`;
+    }
+    const attendeesHtml = hasAttendees
+      ? domains.map(d => `<span class="badge" style="margin-right: 4px;">${escapeHtml(d)}</span>`).join('')
+      : '<span style="color: var(--muted); font-style: italic;">none</span>';
     sourceBlockHtml = `
-      <div style="border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; font-size: 12px; color: var(--muted);">
+      <div style="border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; font-size: 12px;">
         <div style="font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Source: calendar sync</div>
         <div style="line-height: 1.7;">
-          <span style="color: var(--muted);">From:</span> ${organizer}<br>
-          <span style="color: var(--muted);">Attendee domains:</span> ${domains}
+          ${sourceLine}<br>
+          <span style="color: var(--muted);">Attendee domains:</span> ${attendeesHtml}
         </div>
       </div>
     `;
