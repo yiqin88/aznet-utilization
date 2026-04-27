@@ -789,6 +789,122 @@ function _teamWeekBounds() {
 // My Schedule date scope. Engineers: 30/90 days. Managers also get 180/all.
 let _mySchedScope = '30';
 
+// Manage > Projects table filters. Persists across renderManage() calls within a session
+// (e.g. survives a project edit/create round-trip) but resets on full page reload.
+let _projectFilters = { name: '', customer: '', enduser: '', engineer: '', status: 'active' };
+let _projectsCache = { projects: [], customers: [], engineers: [] };
+
+function _projectRowHtml(p) {
+  const team = (p.project_engineers || []).slice().sort((a,b) => (b.is_lead?1:0) - (a.is_lead?1:0));
+  const teamHtml = team.length === 0 ? '<span style="color: var(--muted); font-size: 11px;">— unassigned —</span>' :
+    team.map(pe => pe.is_lead
+      ? `<span class="lead-marker">★ ${escapeHtml(pe.engineers?.name || '?')}</span>`
+      : escapeHtml(pe.engineers?.name || '?')
+    ).join(', ');
+  return `
+    <tr>
+      <td><span class="badge">${escapeHtml(p.full_tag || ('aznet-'+p.project_code))}</span></td>
+      <td>${escapeHtml(p.name || '—')}</td>
+      <td>${escapeHtml(p.customer?.name || '—')}</td>
+      <td>${escapeHtml(p.end_user?.name || '—')}</td>
+      <td>${teamHtml}</td>
+      <td><span class="pill pill-${p.status==='active'?'green':p.status==='completed'?'blue':'gray'}">${escapeHtml(p.status)}</span></td>
+      <td>
+        <button class="small secondary manage-team-btn" data-id="${p.id}">Manage team</button>
+        <button class="small secondary edit-project-btn" data-id="${p.id}">Edit</button>
+        ${p.status === 'active'
+          ? `<button class="small secondary set-status-btn" data-id="${p.id}" data-status="completed">Complete</button>
+             <button class="small secondary set-status-btn" data-id="${p.id}" data-status="cancelled">Cancel</button>`
+          : `<button class="small secondary set-status-btn" data-id="${p.id}" data-status="active">Reopen</button>`}
+        <button class="small danger delete-project-btn" data-id="${p.id}" data-code="${escapeHtml(p.full_tag || ('aznet-'+p.project_code))}">Delete</button>
+      </td>
+    </tr>
+  `;
+}
+
+function _applyProjectFilters() {
+  const f = _projectFilters;
+  return (_projectsCache.projects || []).filter(p => {
+    if (f.status && p.status !== f.status) return false;
+    if (f.customer && String(p.customer_id || '') !== f.customer) return false;
+    if (f.enduser && String(p.end_user_id || '') !== f.enduser) return false;
+    if (f.name) {
+      const needle = f.name.toLowerCase();
+      const inName = (p.name || '').toLowerCase().includes(needle);
+      const inCode = (p.project_code || '').toLowerCase().includes(needle);
+      if (!inName && !inCode) return false;
+    }
+    if (f.engineer) {
+      const onTeam = (p.project_engineers || []).some(pe => String(pe.engineer_id) === f.engineer);
+      if (!onTeam) return false;
+    }
+    return true;
+  });
+}
+
+function _renderProjectsTbody() {
+  const tbody = document.getElementById('projects-tbody');
+  if (!tbody) return;
+  const filtered = _applyProjectFilters();
+  const total = (_projectsCache.projects || []).length;
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--muted); padding: 20px; font-size: 12px;">No projects match the current filters.${total > 0 ? ' <a href="#" id="projects-filter-clear-inline" style="color: var(--blue);">Clear filters</a>' : ''}</td></tr>`;
+    document.getElementById('projects-filter-clear-inline')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      document.getElementById('filter-proj-clear')?.click();
+    });
+  } else {
+    tbody.innerHTML = filtered.map(_projectRowHtml).join('');
+  }
+  const countEl = document.getElementById('projects-filter-count');
+  if (countEl) {
+    countEl.textContent = filtered.length === total
+      ? `${total} project${total===1?'':'s'}`
+      : `${filtered.length} of ${total} projects`;
+  }
+  _bindProjectRowHandlers();
+}
+
+function _bindProjectRowHandlers() {
+  const projects = _projectsCache.projects || [];
+  const customers = _projectsCache.customers || [];
+  document.querySelectorAll('#projects-tbody .set-status-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const { error } = await sb.rpc('rpc_set_project_status', {
+        p_project_id: btn.dataset.id,
+        p_status: btn.dataset.status
+      });
+      if (error) { toast(error.message, 'error'); return; }
+      toast('Status updated.', 'success');
+      await renderManage();
+    });
+  });
+  document.querySelectorAll('#projects-tbody .manage-team-btn').forEach(btn => {
+    btn.addEventListener('click', () => openManageTeamModal(btn.dataset.id));
+  });
+  document.querySelectorAll('#projects-tbody .edit-project-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const proj = projects.find(p => p.id === btn.dataset.id);
+      if (proj) openEditProjectModal(proj, customers);
+    });
+  });
+  document.querySelectorAll('#projects-tbody .delete-project-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const code = btn.dataset.code;
+      const reason = prompt(`Delete project ${code}?\n\nThis is a soft delete — the project becomes hidden but recoverable from the audit log.\n\nReason (recorded in audit log):`);
+      if (reason === null) return;
+      if (!reason.trim()) { toast('A deletion reason is required.', 'error'); return; }
+      const { error } = await sb.rpc('rpc_soft_delete_project', {
+        p_project_id: btn.dataset.id,
+        p_reason: reason.trim()
+      });
+      if (error) { toast(error.message, 'error'); return; }
+      toast('Project deleted.', 'success');
+      await renderManage();
+    });
+  });
+}
+
 async function renderTeamWeek() {
   const root = document.getElementById('view-team-week');
   const today = new Date();
@@ -1242,7 +1358,7 @@ async function renderManage() {
     </div>
 
     <div class="panel">
-      <h2>Projects</h2>
+      <h2>Projects <span id="projects-filter-count" style="font-size: 12px; font-weight: normal; color: var(--muted);"></span></h2>
       <div class="row-form">
         <input type="text" id="proj-code" placeholder="Code (without aznet- prefix, e.g. mandai-itpkg1)">
         <select id="proj-customer"><option value="">SI customer (Invoiced)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
@@ -1254,39 +1370,33 @@ async function renderManage() {
         <input type="text" id="proj-po" placeholder="PO number (optional)" style="max-width: 180px;">
         <button id="proj-add">Create project</button>
       </div>
+      <div class="row-form" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border, #2a2a2a);">
+        <input type="text" id="filter-proj-name" placeholder="Filter by name or code…" style="max-width: 220px;">
+        <select id="filter-proj-customer">
+          <option value="">All SI customers</option>
+          ${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+        </select>
+        <select id="filter-proj-enduser">
+          <option value="">All end users</option>
+          ${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+        </select>
+        <select id="filter-proj-engineer">
+          <option value="">All engineers</option>
+          ${(engineers || []).map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('')}
+        </select>
+        <select id="filter-proj-status" style="max-width: 140px;">
+          <option value="active">Active</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="">All statuses</option>
+        </select>
+        <button id="filter-proj-clear" class="small secondary">Clear filters</button>
+      </div>
       <table>
         <thead>
           <tr><th>Code</th><th>Name</th><th>Customer (SI)</th><th>End User</th><th>Team</th><th>Status</th><th></th></tr>
         </thead>
-        <tbody>
-          ${(projects || []).map(p => {
-            const team = (p.project_engineers || []).slice().sort((a,b) => (b.is_lead?1:0) - (a.is_lead?1:0));
-            const teamHtml = team.length === 0 ? '<span style="color: var(--muted); font-size: 11px;">— unassigned —</span>' :
-              team.map(pe => pe.is_lead
-                ? `<span class="lead-marker">★ ${escapeHtml(pe.engineers?.name || '?')}</span>`
-                : escapeHtml(pe.engineers?.name || '?')
-              ).join(', ');
-            return `
-              <tr>
-                <td><span class="badge">${escapeHtml(p.full_tag || ('aznet-'+p.project_code))}</span></td>
-                <td>${escapeHtml(p.name || '—')}</td>
-                <td>${escapeHtml(p.customer?.name || '—')}</td>
-                <td>${escapeHtml(p.end_user?.name || '—')}</td>
-                <td>${teamHtml}</td>
-                <td><span class="pill pill-${p.status==='active'?'green':p.status==='completed'?'blue':'gray'}">${escapeHtml(p.status)}</span></td>
-                <td>
-                  <button class="small secondary manage-team-btn" data-id="${p.id}">Manage team</button>
-                  <button class="small secondary edit-project-btn" data-id="${p.id}">Edit</button>
-                  ${p.status === 'active'
-                    ? `<button class="small secondary set-status-btn" data-id="${p.id}" data-status="completed">Complete</button>
-                       <button class="small secondary set-status-btn" data-id="${p.id}" data-status="cancelled">Cancel</button>`
-                    : `<button class="small secondary set-status-btn" data-id="${p.id}" data-status="active">Reopen</button>`}
-                  <button class="small danger delete-project-btn" data-id="${p.id}" data-code="${escapeHtml(p.full_tag || ('aznet-'+p.project_code))}">Delete</button>
-                </td>
-              </tr>
-            `;
-          }).join('')}
-        </tbody>
+        <tbody id="projects-tbody"></tbody>
       </table>
     </div>
   `;
@@ -1353,44 +1463,53 @@ async function renderManage() {
     await renderManage();
   });
 
-  document.querySelectorAll('.set-status-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const { error } = await sb.rpc('rpc_set_project_status', {
-        p_project_id: btn.dataset.id,
-        p_status: btn.dataset.status
-      });
-      if (error) { toast(error.message, 'error'); return; }
-      toast('Status updated.', 'success');
-      await renderManage();
-    });
+  // ---- Projects table: populate cache and wire filters ----
+  _projectsCache = {
+    projects: projects || [],
+    customers: customers || [],
+    engineers: engineers || []
+  };
+
+  // Restore previous filter values across renderManage() calls (e.g. after creating a project)
+  const _filterIds = {
+    name: 'filter-proj-name',
+    customer: 'filter-proj-customer',
+    enduser: 'filter-proj-enduser',
+    engineer: 'filter-proj-engineer',
+    status: 'filter-proj-status'
+  };
+  Object.entries(_filterIds).forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    if (el) el.value = _projectFilters[key] ?? '';
   });
 
-  document.querySelectorAll('.manage-team-btn').forEach(btn => {
-    btn.addEventListener('click', () => openManageTeamModal(btn.dataset.id));
+  const _onProjectFilterChange = () => {
+    _projectFilters = {
+      name: document.getElementById('filter-proj-name').value.trim(),
+      customer: document.getElementById('filter-proj-customer').value,
+      enduser: document.getElementById('filter-proj-enduser').value,
+      engineer: document.getElementById('filter-proj-engineer').value,
+      status: document.getElementById('filter-proj-status').value
+    };
+    _renderProjectsTbody();
+  };
+  Object.values(_filterIds).forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', _onProjectFilterChange);
+  });
+  document.getElementById('filter-proj-clear')?.addEventListener('click', () => {
+    _projectFilters = { name: '', customer: '', enduser: '', engineer: '', status: 'active' };
+    document.getElementById('filter-proj-name').value = '';
+    document.getElementById('filter-proj-customer').value = '';
+    document.getElementById('filter-proj-enduser').value = '';
+    document.getElementById('filter-proj-engineer').value = '';
+    document.getElementById('filter-proj-status').value = 'active';
+    _renderProjectsTbody();
   });
 
-  document.querySelectorAll('.edit-project-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const proj = (projects || []).find(p => p.id === btn.dataset.id);
-      if (proj) openEditProjectModal(proj, customers || []);
-    });
-  });
-
-  document.querySelectorAll('.delete-project-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const code = btn.dataset.code;
-      const reason = prompt(`Delete project ${code}?\n\nThis is a soft delete — the project becomes hidden but recoverable from the audit log.\n\nReason (recorded in audit log):`);
-      if (reason === null) return;
-      if (!reason.trim()) { toast('A deletion reason is required.', 'error'); return; }
-      const { error } = await sb.rpc('rpc_soft_delete_project', {
-        p_project_id: btn.dataset.id,
-        p_reason: reason.trim()
-      });
-      if (error) { toast(error.message, 'error'); return; }
-      toast('Project deleted.', 'success');
-      await renderManage();
-    });
-  });
+  // First render of the projects tbody (also binds row handlers)
+  _renderProjectsTbody();
 
   // Pending PO actions (Step B2)
   document.querySelectorAll('.po-activate-btn').forEach(btn => {
