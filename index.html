@@ -417,7 +417,7 @@ async function checkSession() {
     const auditBtn = document.getElementById('nav-audit-btn');
     if (auditBtn) auditBtn.style.display = isManager ? '' : 'none';
     const utilBtn = document.getElementById('nav-utilisation-btn');
-    if (utilBtn) utilBtn.style.display = isManager ? '' : 'none';
+    if (utilBtn) utilBtn.style.display = '';  // visible to all engineers; price_ps hidden server-side
     // Show app FIRST, then render — so a render error doesn't leave a blank page
     hideBootLoading();
     signinEl.style.display = 'none';
@@ -571,10 +571,37 @@ async function renderMySchedule() {
           <option value="others">Other</option>
         </select>
         <select id="manual-project"><option value="">Select project…</option></select>
+        <select id="manual-customer"><option value="">Customer (SI)…</option></select>
         <label><input type="checkbox" id="manual-cutover"> cutover</label>
         <input type="text" id="manual-title" placeholder="Title (optional)" style="flex:1; min-width: 200px;">
         <button id="manual-save">Save entry</button>
       </div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <h2 style="margin: 0;">My projects</h2>
+        <span id="my-projects-count" style="color: var(--muted); font-size: 11px;"></span>
+      </div>
+      <p style="color: var(--muted); font-size: 11px; margin-top: -4px;">
+        Projects you are assigned to. Lead-engineer assignments are marked.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Project</th>
+            <th>Customer (SI)</th>
+            <th>End user</th>
+            <th>Project created</th>
+            <th>Last entry by you</th>
+            <th>Role</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="my-projects-body">
+          <tr><td colspan="7" style="text-align: center; color: var(--muted); padding: 14px;">Loading…</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <div class="panel">
@@ -635,13 +662,35 @@ async function renderMySchedule() {
     document.getElementById('connect-btn').addEventListener('click', startMsCalendarOAuth);
   }
 
-  await populateProjectDropdown('manual-project');
+  // Manual entry: project dropdown shows only this engineer's assigned projects.
+  // Customer (SI) dropdown lists all active customers; auto-fills + locks when
+  // a project is picked, since project entries derive their customer from the
+  // project. For non-project entries (presales, admin, etc.) the engineer picks
+  // a customer manually if relevant.
+  await populateProjectDropdown('manual-project', null, currentEngineer.id);
+  await populateCustomerDropdown('manual-customer');
+
+  const manualProjSel = document.getElementById('manual-project');
+  const manualCustSel = document.getElementById('manual-customer');
+  function syncManualCustomerFromProject() {
+    if (manualProjSel.value) {
+      const opt = manualProjSel.options[manualProjSel.selectedIndex];
+      const derived = opt?.dataset?.customerId || '';
+      manualCustSel.value = derived;
+      manualCustSel.disabled = true;
+    } else {
+      manualCustSel.disabled = false;
+    }
+  }
+  manualProjSel.addEventListener('change', syncManualCustomerFromProject);
+  syncManualCustomerFromProject();
 
   document.getElementById('manual-save').addEventListener('click', async () => {
     const start = document.getElementById('manual-start').value;
     const end = document.getElementById('manual-end').value;
     const type = document.getElementById('manual-type').value;
     const project = document.getElementById('manual-project').value;
+    const customer = document.getElementById('manual-customer').value;
     const cutover = document.getElementById('manual-cutover').checked;
     const title = document.getElementById('manual-title').value;
     if (!start || !end) { toast('Pick start + end', 'error'); return; }
@@ -650,6 +699,7 @@ async function renderMySchedule() {
       p_end_at: new Date(end).toISOString(),
       p_entry_type: type,
       p_project_id: project || null,
+      p_customer_id: customer || null,
       p_is_cutover: cutover,
       p_notes: title || null
     });
@@ -664,6 +714,83 @@ async function renderMySchedule() {
     renderMySchedule();
   });
   renderEntriesTable(entries);
+  renderMyProjects();
+}
+
+// Render the "My projects" panel: shows projects this engineer is assigned to,
+// project creation date, and the date of the engineer's most recent entry on
+// each project. Two queries (assignments + last-entry-per-project) joined in JS.
+async function renderMyProjects() {
+  const tbody = document.getElementById('my-projects-body');
+  const counter = document.getElementById('my-projects-count');
+  if (!tbody || !currentEngineer) return;
+
+  const { data: assignments, error } = await sb
+    .from('project_engineers')
+    .select('is_lead, projects(id, project_code, name, status, created_at, customers:customer_id(name), end_user:end_user_id(name))')
+    .eq('engineer_id', currentEngineer.id);
+
+  if (error) {
+    tbody.innerHTML = `<tr><td colspan="7" style="color: var(--red); padding: 14px;">Failed to load: ${escapeHtml(error.message)}</td></tr>`;
+    return;
+  }
+
+  const rows = (assignments || []).filter(a => a.projects);
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--muted); padding: 14px;">No project assignments yet. Ask a manager to assign you.</td></tr>';
+    counter.textContent = '0 projects';
+    return;
+  }
+
+  // Fetch the engineer's most-recent work_entry start_at per project, in one
+  // bounded query. Order desc + take first occurrence per project_id in JS.
+  const projectIds = rows.map(a => a.projects.id);
+  const { data: entries } = await sb
+    .from('work_entries')
+    .select('project_id, start_at')
+    .eq('engineer_id', currentEngineer.id)
+    .in('project_id', projectIds)
+    .order('start_at', { ascending: false });
+  const lastByProject = new Map();
+  for (const e of (entries || [])) {
+    if (!lastByProject.has(e.project_id)) lastByProject.set(e.project_id, e.start_at);
+  }
+
+  // Sort: lead first, then most-recently-active, then alpha by project_code
+  rows.sort((a, b) => {
+    if (a.is_lead !== b.is_lead) return a.is_lead ? -1 : 1;
+    const la = lastByProject.get(a.projects.id) || '';
+    const lb = lastByProject.get(b.projects.id) || '';
+    if (la !== lb) return lb.localeCompare(la);
+    return (a.projects.project_code || '').localeCompare(b.projects.project_code || '');
+  });
+
+  tbody.innerHTML = rows.map(a => {
+    const p = a.projects;
+    const lastAt = lastByProject.get(p.id);
+    const lastCell = lastAt
+      ? `<span>${escapeHtml(fmtDate(lastAt))}</span>`
+      : '<span style="color: var(--muted); font-style: italic;">never</span>';
+    const statusCls = p.status === 'active' ? 'green' : p.status === 'completed' ? 'blue' : 'gray';
+    const roleBadge = a.is_lead
+      ? '<span class="pill pill-purple">lead</span>'
+      : '<span class="pill pill-gray">team</span>';
+    return `
+      <tr>
+        <td>
+          <span class="badge">${escapeHtml(p.project_code || '')}</span>
+          <br><span style="font-size: 11px; color: var(--muted);">${escapeHtml(p.name || '—')}</span>
+        </td>
+        <td style="font-size: 11px;">${escapeHtml(p.customers?.name || '—')}</td>
+        <td style="font-size: 11px;">${escapeHtml(p.end_user?.name || '—')}</td>
+        <td style="font-size: 11px;">${escapeHtml(fmtDate(p.created_at))}</td>
+        <td style="font-size: 11px;">${lastCell}</td>
+        <td>${roleBadge}</td>
+        <td><span class="pill pill-${statusCls}">${escapeHtml(p.status)}</span></td>
+      </tr>
+    `;
+  }).join('');
+  counter.textContent = `${rows.length} project${rows.length===1?'':'s'}`;
 }
 
 function renderEntriesTable(entries) {
@@ -708,16 +835,45 @@ function renderEntriesTable(entries) {
   });
 }
 
-async function populateProjectDropdown(selectId, selectedId = null) {
-  const { data } = await sb.from('projects').select('id, project_code, name, customers:customer_id(name)').eq('status', 'active').order('project_code');
+async function populateProjectDropdown(selectId, selectedId = null, engineerId = null) {
+  let query = sb.from('projects')
+    .select('id, project_code, name, customer_id, customers:customer_id(name)')
+    .eq('status', 'active')
+    .order('project_code');
+  // When engineerId provided, restrict to that engineer's assigned projects
+  // by first fetching their assignment list. Two-step (rather than a JOIN)
+  // because PostgREST doesn't make that join straightforward.
+  if (engineerId) {
+    const { data: assigns } = await sb.from('project_engineers')
+      .select('project_id').eq('engineer_id', engineerId);
+    const ids = (assigns || []).map(a => a.project_id);
+    if (ids.length === 0) {
+      const sel = document.getElementById(selectId);
+      if (sel) sel.innerHTML = '<option value="">No assigned projects</option>';
+      return;
+    }
+    query = query.in('id', ids);
+  }
+  const { data } = await query;
   const sel = document.getElementById(selectId);
   if (!sel) return;
   const cur = sel.value;
-  sel.innerHTML = '<option value="">Select project…</option>' + (data || []).map(p =>
-    `<option value="${p.id}" ${p.id === selectedId ? 'selected' : ''}>${escapeHtml(p.project_code)} — ${escapeHtml(p.name || '')} (${escapeHtml(p.customers?.name || 'no SI')})</option>`
+  const placeholder = engineerId ? 'Select your project…' : 'Select project…';
+  sel.innerHTML = `<option value="">${placeholder}</option>` + (data || []).map(p =>
+    `<option value="${p.id}" data-customer-id="${p.customer_id || ''}" ${p.id === selectedId ? 'selected' : ''}>${escapeHtml(p.project_code)} — ${escapeHtml(p.name || '')} (${escapeHtml(p.customers?.name || 'no SI')})</option>`
   ).join('');
   if (selectedId) sel.value = selectedId;
   else if (cur) sel.value = cur;
+}
+
+async function populateCustomerDropdown(selectId, selectedId = null) {
+  const { data } = await sb.from('customers').select('id, name').eq('active', true).order('name');
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Customer (SI)…</option>' + (data || []).map(c =>
+    `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${escapeHtml(c.name)}</option>`
+  ).join('');
+  if (selectedId) sel.value = selectedId;
 }
 
 async function openEntryEditModal(entryId, entries) {
@@ -1923,13 +2079,26 @@ let _utilFilter = 'all';  // 'all' | 'active' | 'at-risk' | 'over'
 
 async function renderUtilisation() {
   const root = document.getElementById('view-utilisation');
-  if (!isManager) {
-    root.innerHTML = '<div class="panel"><h2>Not authorised</h2><p style="color: var(--muted);">Utilisation is for managers only.</p></div>';
-    return;
-  }
+
+  // Visible to all engineers. For non-managers, price_ps is excluded from the
+  // SELECT to avoid sending revenue figures over the wire — even though the
+  // current UI doesn't display $ anywhere. Engineers cannot see cost data
+  // through this view.
+  // Known gap: a curious engineer could still query the projects table directly
+  // via the Supabase client and read price_ps. Proper hardening requires
+  // column-level RLS or a price-stripped view; flagged for follow-up.
+  const utilCols = isManager
+    ? '*'
+    : 'project_id,project_code,full_tag,name,status,source,po_number,created_at,completed_at,'
+    + 'customer_id,customer_name,end_user_id,end_user_name,'
+    + 'quoted_office_md,quoted_cutover_md,quoted_total_md,'
+    + 'office_md_logged,cutover_md_logged,total_md_logged,'
+    + 'office_hours_logged,cutover_hours_logged,office_entries,cutover_entries,'
+    + 'distinct_engineers,last_entry_at,days_since_created,days_to_complete,days_since_activity,'
+    + 'office_pct_used,cutover_pct_used,total_pct_used';
 
   const { data: rows, error } = await sb.from('v_project_utilisation')
-    .select('*')
+    .select(utilCols)
     .order('total_pct_used', { ascending: false, nullsFirst: false });
   if (error) {
     root.innerHTML = `<div class="panel"><h2>Utilisation</h2><p style="color: var(--red);">Failed to load: ${escapeHtml(error.message)}</p></div>`;
