@@ -163,6 +163,9 @@
   .entry-bubble.internal { background: rgba(255,123,114,0.1); border-left-color: var(--pink); }
   .entry-bubble.pm { background: rgba(76,194,255,0.08); border-left-color: var(--accent); }
   .entry-bubble.cm { background: rgba(210,153,34,0.12); border-left-color: var(--yellow); }
+  .entry-bubble.hr { background: rgba(255,142,200,0.1); border-left-color: #ff8ec8; }
+  .entry-bubble.presales { background: rgba(255,152,0,0.12); border-left-color: #ff9800; }
+  .entry-bubble.others { background: rgba(139,148,168,0.08); border-left-color: var(--muted); }
   .entry-bubble strong { display: block; font-size: 11px; }
   .entry-bubble .small { color: var(--muted); font-size: 10px; }
   /* Review states (Step 26b) */
@@ -326,6 +329,24 @@ function escapeHtml(s) {
   if (s == null) return '';
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+
+// Friendly display labels for entry_type. Single source of truth — used in My
+// Schedule, Team Week, review modal, edit modal, and any reporting view.
+const TYPE_LABELS = {
+  project: 'Project',
+  pm: 'PM',
+  cm: 'CM',
+  presales: 'Pre-sales',
+  admin: 'Admin',
+  hr: 'HR',
+  training: 'Training',
+  standby: 'Standby',
+  leave: 'Leave',
+  internal: 'Internal',
+  others: 'Other',
+  unmatched: 'Unmatched'
+};
+function typeLabel(t) { return TYPE_LABELS[t] || t || ''; }
 
 // Concurrency guard: onAuthStateChange + the manual checkSession() at end of
 // script can fire this in parallel during page boot. Only one runs at a time.
@@ -541,10 +562,13 @@ async function renderMySchedule() {
           <option value="project">Project</option>
           <option value="pm">PM (Preventive Maintenance)</option>
           <option value="cm">CM (Corrective Maintenance)</option>
-          <option value="leave">Leave</option>
+          <option value="presales">Pre-sales</option>
           <option value="admin">Admin</option>
+          <option value="hr">HR</option>
           <option value="training">Training</option>
           <option value="standby">Standby</option>
+          <option value="leave">Leave</option>
+          <option value="others">Other</option>
         </select>
         <select id="manual-project"><option value="">Select project…</option></select>
         <label><input type="checkbox" id="manual-cutover"> cutover</label>
@@ -716,11 +740,14 @@ async function openEntryEditModal(entryId, entries) {
             <option value="project" ${entry.entry_type==='project'?'selected':''}>Project</option>
             <option value="pm" ${entry.entry_type==='pm'?'selected':''}>PM (Preventive Maintenance)</option>
             <option value="cm" ${entry.entry_type==='cm'?'selected':''}>CM (Corrective Maintenance)</option>
-            <option value="leave" ${entry.entry_type==='leave'?'selected':''}>Leave</option>
+            <option value="presales" ${entry.entry_type==='presales'?'selected':''}>Pre-sales</option>
             <option value="admin" ${entry.entry_type==='admin'?'selected':''}>Admin</option>
+            <option value="hr" ${entry.entry_type==='hr'?'selected':''}>HR</option>
             <option value="training" ${entry.entry_type==='training'?'selected':''}>Training</option>
             <option value="standby" ${entry.entry_type==='standby'?'selected':''}>Standby</option>
+            <option value="leave" ${entry.entry_type==='leave'?'selected':''}>Leave</option>
             <option value="internal" ${entry.entry_type==='internal'?'selected':''}>Internal</option>
+            <option value="others" ${entry.entry_type==='others'?'selected':''}>Other</option>
           </select>
         </div>
         <div class="modal-row">
@@ -1066,19 +1093,14 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
       : '<span style="color: var(--red);">✕ Rejected</span>';
   const customerLabel = entry.customers?.name ? escapeHtml(entry.customers.name) : '—';
 
-  // Friendly entry type labels
-  const TYPE_LABELS = {
-    project: 'Project',
+  // Friendly type label (uses global TYPE_LABELS)
+  // Modal shows full name including the long-form for PM/CM
+  const TYPE_LABELS_MODAL = {
+    ...TYPE_LABELS,
     pm: 'PM (Preventive Maintenance)',
-    cm: 'CM (Corrective Maintenance)',
-    leave: 'Leave',
-    admin: 'Admin',
-    training: 'Training',
-    standby: 'Standby',
-    internal: 'Internal',
-    unmatched: 'Unmatched'
+    cm: 'CM (Corrective Maintenance)'
   };
-  const typeLabel = TYPE_LABELS[entry.entry_type] || entry.entry_type;
+  const typeLabel = TYPE_LABELS_MODAL[entry.entry_type] || entry.entry_type;
 
   // Re-categorise dropdowns are meaningful for project/pm/cm (all three can have a project)
   const canRecategorise = ['project','pm','cm'].includes(entry.entry_type);
