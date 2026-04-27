@@ -257,6 +257,7 @@
     <nav>
       <button data-view="my-schedule" class="active">My Schedule</button>
       <button data-view="team-week">Team Week</button>
+      <button id="nav-projects-btn" data-view="projects">Projects</button>
       <button id="nav-manage-btn" data-view="manage">Manage</button>
       <button id="nav-utilisation-btn" data-view="utilisation">Utilisation</button>
       <button id="nav-audit-btn" data-view="audit">Audit</button>
@@ -266,6 +267,7 @@
   <main>
     <div id="view-my-schedule"></div>
     <div id="view-team-week" style="display:none"></div>
+    <div id="view-projects" style="display:none"></div>
     <div id="view-manage" style="display:none"></div>
     <div id="view-utilisation" style="display:none"></div>
     <div id="view-audit" style="display:none"></div>
@@ -411,9 +413,11 @@ async function checkSession() {
       appEl.style.display = 'none';
       return;
     }
-    // Hide Manage tab for non-managers (defense in depth — RPCs also check)
+    // Hide manager-only tabs for non-managers (defense in depth — RPCs also check)
     const manageBtn = document.getElementById('nav-manage-btn');
     if (manageBtn) manageBtn.style.display = isManager ? '' : 'none';
+    const projectsBtn = document.getElementById('nav-projects-btn');
+    if (projectsBtn) projectsBtn.style.display = isManager ? '' : 'none';
     const auditBtn = document.getElementById('nav-audit-btn');
     if (auditBtn) auditBtn.style.display = isManager ? '' : 'none';
     const utilBtn = document.getElementById('nav-utilisation-btn');
@@ -493,10 +497,12 @@ document.querySelectorAll('nav button[data-view]').forEach(btn => {
     const v = btn.dataset.view;
     document.getElementById('view-my-schedule').style.display = v === 'my-schedule' ? 'block' : 'none';
     document.getElementById('view-team-week').style.display = v === 'team-week' ? 'block' : 'none';
+    document.getElementById('view-projects').style.display = v === 'projects' ? 'block' : 'none';
     document.getElementById('view-manage').style.display = v === 'manage' ? 'block' : 'none';
     document.getElementById('view-utilisation').style.display = v === 'utilisation' ? 'block' : 'none';
     document.getElementById('view-audit').style.display = v === 'audit' ? 'block' : 'none';
     if (v === 'team-week') renderTeamWeek();
+    if (v === 'projects') renderProjects();
     if (v === 'manage') renderManage();
     if (v === 'utilisation') renderUtilisation();
     if (v === 'audit') renderAuditLog();
@@ -735,7 +741,7 @@ async function renderMyProjects() {
     return;
   }
 
-  const rows = (assignments || []).filter(a => a.projects);
+  const rows = (assignments || []).filter(a => a.projects && a.projects.status !== 'deleted');
   if (rows.length === 0) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--muted); padding: 14px;">No project assignments yet. Ask a manager to assign you.</td></tr>';
     counter.textContent = '0 projects';
@@ -1079,7 +1085,7 @@ function _bindProjectRowHandlers() {
       });
       if (error) { toast(error.message, 'error'); return; }
       toast('Status updated.', 'success');
-      await renderManage();
+      await renderProjects();
     });
   });
   document.querySelectorAll('#projects-tbody .manage-team-btn').forEach(btn => {
@@ -1103,7 +1109,7 @@ function _bindProjectRowHandlers() {
       });
       if (error) { toast(error.message, 'error'); return; }
       toast('Project deleted.', 'success');
-      await renderManage();
+      await renderProjects();
     });
   });
 }
@@ -1518,12 +1524,10 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
   });
 }
 
-async function renderManage() {
-  const root = document.getElementById('view-manage');
-  // Defense in depth: if a non-manager somehow reaches this view (e.g. cached
-  // nav button still visible), don't render it. RLS/RPCs also block writes.
+async function renderProjects() {
+  const root = document.getElementById('view-projects');
   if (!isManager) {
-    root.innerHTML = '<div class="panel"><h2>Not authorised</h2><p style="color: var(--muted);">The Manage tab is for managers only.</p></div>';
+    root.innerHTML = '<div class="panel"><h2>Not authorised</h2><p style="color: var(--muted);">The Projects tab is for managers only.</p></div>';
     return;
   }
   const { data: engineers } = await sb.from('engineers').select('*').order('name');
@@ -1594,6 +1598,193 @@ async function renderManage() {
     ` : ''}
 
     <div class="panel">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+        <h2 style="margin: 0; flex: 1;">Projects <span id="projects-filter-count" style="font-size: 12px; font-weight: normal; color: var(--muted);"></span></h2>
+        <button id="create-project-toggle" class="small secondary">+ New project</button>
+      </div>
+
+      <div id="create-project-section" style="display: none; padding: 14px; background: var(--panel-2); border-radius: 6px; margin-bottom: 20px;">
+        <div style="font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; font-weight: 500;">Create new project</div>
+        <div class="row-form" style="margin-bottom: 0;">
+          <input type="text" id="proj-code" placeholder="Code (without aznet- prefix, e.g. mandai-itpkg1)">
+          <select id="proj-customer"><option value="">SI customer (Invoiced)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
+          <select id="proj-enduser"><option value="">End user (Beneficiary)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
+          <input type="text" id="proj-name" placeholder="Name (e.g. Mandai IT Infra Pkg 1)">
+          <input type="number" id="proj-office-md" placeholder="Office MDs" step="0.5" min="0" style="max-width: 110px;">
+          <input type="number" id="proj-cutover-md" placeholder="Cutover MDs" step="0.5" min="0" style="max-width: 120px;">
+          <input type="number" id="proj-price" placeholder="PS price (SGD)" step="100" min="0" style="max-width: 140px;">
+          <input type="text" id="proj-po" placeholder="PO number (optional)" style="max-width: 180px;">
+          <button id="proj-add">Create project</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <div style="font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; font-weight: 500;">Filter</div>
+        <div class="row-form" style="margin-bottom: 0;">
+          <input type="text" id="filter-proj-name" placeholder="Filter by name or code…" style="max-width: 220px;">
+          <select id="filter-proj-customer">
+            <option value="">All SI customers</option>
+            ${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+          </select>
+          <select id="filter-proj-enduser">
+            <option value="">All end users</option>
+            ${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+          </select>
+          <select id="filter-proj-engineer">
+            <option value="">All engineers</option>
+            ${(engineers || []).map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('')}
+          </select>
+          <select id="filter-proj-status" style="max-width: 140px;">
+            <option value="active">Active</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="">All statuses</option>
+          </select>
+          <button id="filter-proj-clear" class="small secondary">Clear filters</button>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Name</th><th>Customer (SI)</th><th>End User</th><th>Team</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody id="projects-tbody"></tbody>
+      </table>
+    </div>
+  `;
+
+  document.getElementById('proj-add').addEventListener('click', async () => {
+    const code = document.getElementById('proj-code').value.trim();
+    const name = document.getElementById('proj-name').value.trim();
+    if (!code || !name) { toast('Code and name are required.', 'error'); return; }
+    const officeMd = parseFloat(document.getElementById('proj-office-md').value) || 0;
+    const cutoverMd = parseFloat(document.getElementById('proj-cutover-md').value) || 0;
+    const priceRaw = document.getElementById('proj-price').value;
+    const price = priceRaw === '' ? null : parseFloat(priceRaw);
+    const poNumber = document.getElementById('proj-po').value.trim() || null;
+    const { error } = await sb.rpc('rpc_create_project', {
+      p_project_code: code,
+      p_customer_id: document.getElementById('proj-customer').value || null,
+      p_project_name: name,
+      p_quoted_office_mandays: officeMd,
+      p_quoted_cutover_mandays: cutoverMd,
+      p_price_ps: price,
+      p_end_user_id: document.getElementById('proj-enduser').value || null,
+      p_po_number: poNumber
+    });
+    if (error) { toast(error.message, 'error'); return; }
+    toast('Project created.', 'success');
+    await renderProjects();
+  });
+
+  // ---- Projects table: populate cache and wire filters ----
+  document.getElementById('create-project-toggle')?.addEventListener('click', () => {
+    const section = document.getElementById('create-project-section');
+    const btn = document.getElementById('create-project-toggle');
+    if (!section || !btn) return;
+    const isHidden = section.style.display === 'none';
+    section.style.display = isHidden ? 'block' : 'none';
+    btn.textContent = isHidden ? '− Hide form' : '+ New project';
+  });
+  _projectsCache = {
+    projects: projects || [],
+    customers: customers || [],
+    engineers: engineers || []
+  };
+
+  // Restore previous filter values across renderProjects() calls
+  const _filterIds = {
+    name: 'filter-proj-name',
+    customer: 'filter-proj-customer',
+    enduser: 'filter-proj-enduser',
+    engineer: 'filter-proj-engineer',
+    status: 'filter-proj-status'
+  };
+  Object.entries(_filterIds).forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    if (el) el.value = _projectFilters[key] ?? '';
+  });
+
+  const _onProjectFilterChange = () => {
+    _projectFilters = {
+      name: document.getElementById('filter-proj-name').value.trim(),
+      customer: document.getElementById('filter-proj-customer').value,
+      enduser: document.getElementById('filter-proj-enduser').value,
+      engineer: document.getElementById('filter-proj-engineer').value,
+      status: document.getElementById('filter-proj-status').value
+    };
+    _renderProjectsTbody();
+  };
+  Object.values(_filterIds).forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', _onProjectFilterChange);
+  });
+  document.getElementById('filter-proj-clear')?.addEventListener('click', () => {
+    _projectFilters = { name: '', customer: '', enduser: '', engineer: '', status: 'active' };
+    document.getElementById('filter-proj-name').value = '';
+    document.getElementById('filter-proj-customer').value = '';
+    document.getElementById('filter-proj-enduser').value = '';
+    document.getElementById('filter-proj-engineer').value = '';
+    document.getElementById('filter-proj-status').value = 'active';
+    _renderProjectsTbody();
+  });
+
+  _renderProjectsTbody();
+
+  // Pending PO actions (Step B2)
+  document.querySelectorAll('.po-activate-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const token = btn.dataset.token;
+      if (!confirm(`Activate PO ${token}? The project will be created with the extracted values as-is.`)) return;
+      btn.disabled = true; btn.textContent = '…';
+      const { error } = await sb.rpc('rpc_confirm_pending_po', { p_token: token });
+      if (error) {
+        toast('Activation failed: ' + error.message, 'error');
+        btn.disabled = false; btn.textContent = 'Activate';
+        return;
+      }
+      toast('Project created from PO.', 'success');
+      await renderProjects();
+    });
+  });
+
+  document.querySelectorAll('.po-reject-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const token = btn.dataset.token;
+      const reason = prompt(`Reject PO ${token}? (e.g. duplicate, wrong forward, customer cancelled)\n\nReason:`);
+      if (reason === null) return;
+      const { error } = await sb.rpc('rpc_reject_pending_po', {
+        p_token: token,
+        p_reason: reason.trim() || null
+      });
+      if (error) { toast('Reject failed: ' + error.message, 'error'); return; }
+      toast('PO rejected.', 'success');
+      await renderProjects();
+    });
+  });
+
+  document.querySelectorAll('.po-edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const po = (pendingPOs || []).find(p => p.token === btn.dataset.token);
+      if (po) openConfirmPOModal(po, customers || []);
+    });
+  });
+}
+
+async function renderManage() {
+  const root = document.getElementById('view-manage');
+  // Defense in depth: if a non-manager somehow reaches this view (e.g. cached
+  // nav button still visible), don't render it. RLS/RPCs also block writes.
+  if (!isManager) {
+    root.innerHTML = '<div class="panel"><h2>Not authorised</h2><p style="color: var(--muted);">The Manage tab is for managers only.</p></div>';
+    return;
+  }
+  const { data: engineers } = await sb.from('engineers').select('*').order('name');
+  const { data: customers } = await sb.from('customers').select('*').order('name');
+
+  root.innerHTML = `
+    <div class="panel">
       <h2>Add engineer</h2>
       <div class="row-form">
         <input type="text" id="eng-name" placeholder="Name">
@@ -1651,61 +1842,6 @@ async function renderManage() {
         </tbody>
       </table>
     </div>
-
-    <div class="panel">
-      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-        <h2 style="margin: 0; flex: 1;">Projects <span id="projects-filter-count" style="font-size: 12px; font-weight: normal; color: var(--muted);"></span></h2>
-        <button id="create-project-toggle" class="small secondary">+ New project</button>
-      </div>
-
-      <div id="create-project-section" style="display: none; padding: 14px; background: var(--panel-2); border-radius: 6px; margin-bottom: 20px;">
-        <div style="font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; font-weight: 500;">Create new project</div>
-        <div class="row-form" style="margin-bottom: 0;">
-          <input type="text" id="proj-code" placeholder="Code (without aznet- prefix, e.g. mandai-itpkg1)">
-          <select id="proj-customer"><option value="">SI customer (Invoiced)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
-          <select id="proj-enduser"><option value="">End user (Beneficiary)…</option>${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
-          <input type="text" id="proj-name" placeholder="Name (e.g. Mandai IT Infra Pkg 1)">
-          <input type="number" id="proj-office-md" placeholder="Office MDs" step="0.5" min="0" style="max-width: 110px;">
-          <input type="number" id="proj-cutover-md" placeholder="Cutover MDs" step="0.5" min="0" style="max-width: 120px;">
-          <input type="number" id="proj-price" placeholder="PS price (SGD)" step="100" min="0" style="max-width: 140px;">
-          <input type="text" id="proj-po" placeholder="PO number (optional)" style="max-width: 180px;">
-          <button id="proj-add">Create project</button>
-        </div>
-      </div>
-
-      <div style="margin-bottom: 12px;">
-        <div style="font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; font-weight: 500;">Filter</div>
-        <div class="row-form" style="margin-bottom: 0;">
-          <input type="text" id="filter-proj-name" placeholder="Filter by name or code…" style="max-width: 220px;">
-          <select id="filter-proj-customer">
-            <option value="">All SI customers</option>
-            ${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
-          </select>
-          <select id="filter-proj-enduser">
-            <option value="">All end users</option>
-            ${(customers || []).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
-          </select>
-          <select id="filter-proj-engineer">
-            <option value="">All engineers</option>
-            ${(engineers || []).map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('')}
-          </select>
-          <select id="filter-proj-status" style="max-width: 140px;">
-            <option value="active">Active</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="">All statuses</option>
-          </select>
-          <button id="filter-proj-clear" class="small secondary">Clear filters</button>
-        </div>
-      </div>
-
-      <table>
-        <thead>
-          <tr><th>Code</th><th>Name</th><th>Customer (SI)</th><th>End User</th><th>Team</th><th>Status</th><th></th></tr>
-        </thead>
-        <tbody id="projects-tbody"></tbody>
-      </table>
-    </div>
   `;
 
   document.getElementById('eng-add').addEventListener('click', async () => {
@@ -1743,126 +1879,6 @@ async function renderManage() {
       if (error) { toast(error.message, 'error'); return; }
       toast('Updated.', 'success');
       await renderManage();
-    });
-  });
-
-  document.getElementById('proj-add').addEventListener('click', async () => {
-    const code = document.getElementById('proj-code').value.trim();
-    const name = document.getElementById('proj-name').value.trim();
-    if (!code || !name) { toast('Code and name are required.', 'error'); return; }
-    const officeMd = parseFloat(document.getElementById('proj-office-md').value) || 0;
-    const cutoverMd = parseFloat(document.getElementById('proj-cutover-md').value) || 0;
-    const priceRaw = document.getElementById('proj-price').value;
-    const price = priceRaw === '' ? null : parseFloat(priceRaw);
-    const poNumber = document.getElementById('proj-po').value.trim() || null;
-    const { error } = await sb.rpc('rpc_create_project', {
-      p_project_code: code,
-      p_customer_id: document.getElementById('proj-customer').value || null,
-      p_project_name: name,
-      p_quoted_office_mandays: officeMd,
-      p_quoted_cutover_mandays: cutoverMd,
-      p_price_ps: price,
-      p_end_user_id: document.getElementById('proj-enduser').value || null,
-      p_po_number: poNumber
-    });
-    if (error) { toast(error.message, 'error'); return; }
-    toast('Project created.', 'success');
-    await renderManage();
-  });
-
-  // ---- Projects table: populate cache and wire filters ----
-  // Toggle for the (collapsed by default) Create new project section.
-  document.getElementById('create-project-toggle')?.addEventListener('click', () => {
-    const section = document.getElementById('create-project-section');
-    const btn = document.getElementById('create-project-toggle');
-    if (!section || !btn) return;
-    const isHidden = section.style.display === 'none';
-    section.style.display = isHidden ? 'block' : 'none';
-    btn.textContent = isHidden ? '− Hide form' : '+ New project';
-  });
-  _projectsCache = {
-    projects: projects || [],
-    customers: customers || [],
-    engineers: engineers || []
-  };
-
-  // Restore previous filter values across renderManage() calls (e.g. after creating a project)
-  const _filterIds = {
-    name: 'filter-proj-name',
-    customer: 'filter-proj-customer',
-    enduser: 'filter-proj-enduser',
-    engineer: 'filter-proj-engineer',
-    status: 'filter-proj-status'
-  };
-  Object.entries(_filterIds).forEach(([key, id]) => {
-    const el = document.getElementById(id);
-    if (el) el.value = _projectFilters[key] ?? '';
-  });
-
-  const _onProjectFilterChange = () => {
-    _projectFilters = {
-      name: document.getElementById('filter-proj-name').value.trim(),
-      customer: document.getElementById('filter-proj-customer').value,
-      enduser: document.getElementById('filter-proj-enduser').value,
-      engineer: document.getElementById('filter-proj-engineer').value,
-      status: document.getElementById('filter-proj-status').value
-    };
-    _renderProjectsTbody();
-  };
-  Object.values(_filterIds).forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', _onProjectFilterChange);
-  });
-  document.getElementById('filter-proj-clear')?.addEventListener('click', () => {
-    _projectFilters = { name: '', customer: '', enduser: '', engineer: '', status: 'active' };
-    document.getElementById('filter-proj-name').value = '';
-    document.getElementById('filter-proj-customer').value = '';
-    document.getElementById('filter-proj-enduser').value = '';
-    document.getElementById('filter-proj-engineer').value = '';
-    document.getElementById('filter-proj-status').value = 'active';
-    _renderProjectsTbody();
-  });
-
-  // First render of the projects tbody (also binds row handlers)
-  _renderProjectsTbody();
-
-  // Pending PO actions (Step B2)
-  document.querySelectorAll('.po-activate-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const token = btn.dataset.token;
-      if (!confirm(`Activate PO ${token}? The project will be created with the extracted values as-is.`)) return;
-      btn.disabled = true; btn.textContent = '…';
-      const { error } = await sb.rpc('rpc_confirm_pending_po', { p_token: token });
-      if (error) {
-        toast('Activation failed: ' + error.message, 'error');
-        btn.disabled = false; btn.textContent = 'Activate';
-        return;
-      }
-      toast('Project created from PO.', 'success');
-      await renderManage();
-    });
-  });
-
-  document.querySelectorAll('.po-reject-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const token = btn.dataset.token;
-      const reason = prompt(`Reject PO ${token}? (e.g. duplicate, wrong forward, customer cancelled)\n\nReason:`);
-      if (reason === null) return;
-      const { error } = await sb.rpc('rpc_reject_pending_po', {
-        p_token: token,
-        p_reason: reason.trim() || null
-      });
-      if (error) { toast('Reject failed: ' + error.message, 'error'); return; }
-      toast('PO rejected.', 'success');
-      await renderManage();
-    });
-  });
-
-  document.querySelectorAll('.po-edit-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const po = (pendingPOs || []).find(p => p.token === btn.dataset.token);
-      if (po) openConfirmPOModal(po, customers || []);
     });
   });
 }
@@ -1963,7 +1979,7 @@ function openEditProjectModal(project, customers) {
     }
     toast('Project updated.', 'success');
     c.innerHTML = '';
-    await renderManage();
+    await renderProjects();
   });
 }
 
@@ -2065,7 +2081,7 @@ function openConfirmPOModal(po, customers) {
     }
     toast('Project created from PO.', 'success');
     c.innerHTML = '';
-    await renderManage();
+    await renderProjects();
   });
 }
 
@@ -2443,7 +2459,7 @@ async function openManageTeamModal(projectId) {
     if (errors.length) { toast(errors.join('; '), 'error'); return; }
     toast('Team updated.', 'success');
     c.innerHTML = '';
-    await renderManage();
+    await renderProjects();
   });
 }
 
