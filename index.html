@@ -1102,8 +1102,11 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
   };
   const typeLabel = TYPE_LABELS_MODAL[entry.entry_type] || entry.entry_type;
 
-  // Re-categorise dropdowns are meaningful for project/pm/cm (all three can have a project)
-  const canRecategorise = ['project','pm','cm'].includes(entry.entry_type);
+  // Re-categorise is always available now: manager can change the entry's type
+  // (project/pm/cm/admin/hr/presales/training/standby/leave/internal/others).
+  // Project + Customer rows are only meaningful for project/pm/cm — they're
+  // hidden via JS when the type dropdown is set to anything else.
+  const PROJECT_LIKE_TYPES = ['project', 'pm', 'cm'];
   const currentProjectId = entry.project_id || '';
   const currentCustomerId = entry.customer_id || '';
 
@@ -1176,17 +1179,32 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
 
         ${sourceBlockHtml}
 
-        ${canRecategorise ? `
         <div style="border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px;">
           <div style="font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Re-categorise (optional)</div>
           <div class="modal-row">
+            <label>Type</label>
+            <select id="reassign-type">
+              <option value="project" ${entry.entry_type==='project'?'selected':''}>Project</option>
+              <option value="pm" ${entry.entry_type==='pm'?'selected':''}>PM (Preventive Maintenance)</option>
+              <option value="cm" ${entry.entry_type==='cm'?'selected':''}>CM (Corrective Maintenance)</option>
+              <option value="presales" ${entry.entry_type==='presales'?'selected':''}>Pre-sales</option>
+              <option value="admin" ${entry.entry_type==='admin'?'selected':''}>Admin</option>
+              <option value="hr" ${entry.entry_type==='hr'?'selected':''}>HR</option>
+              <option value="training" ${entry.entry_type==='training'?'selected':''}>Training</option>
+              <option value="standby" ${entry.entry_type==='standby'?'selected':''}>Standby</option>
+              <option value="leave" ${entry.entry_type==='leave'?'selected':''}>Leave</option>
+              <option value="internal" ${entry.entry_type==='internal'?'selected':''}>Internal</option>
+              <option value="others" ${entry.entry_type==='others'?'selected':''}>Other</option>
+            </select>
+          </div>
+          <div class="modal-row" id="reassign-project-row">
             <label>Project</label>
             <select id="reassign-project">
               <option value="">— none —</option>
               ${projectOptions}
             </select>
           </div>
-          <div class="modal-row">
+          <div class="modal-row" id="reassign-customer-row">
             <label>Customer</label>
             <select id="reassign-customer">
               <option value="">— none —</option>
@@ -1195,11 +1213,6 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
             <span id="reassign-customer-hint" style="font-size: 10px; color: var(--muted); margin-top: 2px;"></span>
           </div>
         </div>
-        ` : `
-        <div style="border-top: 1px solid var(--border); padding: 10px 0; margin-top: 10px; font-size: 11px; color: var(--muted); font-style: italic;">
-          To re-categorise this ${escapeHtml(typeLabel)} entry, flag it and have the engineer re-create as a project entry.
-        </div>
-        `}
 
         <div style="border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px;">
           <div style="font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Review action</div>
@@ -1226,51 +1239,70 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
     </div>
   `;
 
-  // Project ↔ customer auto-fill + lock (only when re-categorise UI is shown)
-  if (canRecategorise) {
-    const projSel = document.getElementById('reassign-project');
-    const custSel = document.getElementById('reassign-customer');
-    const custHint = document.getElementById('reassign-customer-hint');
-    function syncCustomerFromProject() {
-      if (projSel.value) {
-        const opt = projSel.options[projSel.selectedIndex];
-        const derivedCustomerId = opt?.dataset?.customerId || '';
-        custSel.value = derivedCustomerId;
-        custSel.disabled = true;
-        custHint.textContent = 'Auto-filled from project. Clear project to edit customer manually.';
-      } else {
-        custSel.disabled = false;
-        custHint.textContent = '';
-      }
+  // Show/hide project + customer rows based on selected type, and auto-fill
+  // customer from project when type is project/pm/cm.
+  const typeSel = document.getElementById('reassign-type');
+  const projSel = document.getElementById('reassign-project');
+  const custSel = document.getElementById('reassign-customer');
+  const custHint = document.getElementById('reassign-customer-hint');
+  const projRow = document.getElementById('reassign-project-row');
+  const custRow = document.getElementById('reassign-customer-row');
+
+  function syncTypeVisibility() {
+    const isProjectLike = PROJECT_LIKE_TYPES.includes(typeSel.value);
+    projRow.style.display = isProjectLike ? '' : 'none';
+    custRow.style.display = isProjectLike ? '' : 'none';
+    if (!isProjectLike) {
+      // Clear project/customer when switching away from project-like types,
+      // since the RPC will reject project_id for non-project/pm/cm types anyway.
+      projSel.value = '';
+      custSel.value = '';
+      custSel.disabled = false;
+      custHint.textContent = '';
     }
-    projSel.addEventListener('change', syncCustomerFromProject);
-    syncCustomerFromProject();
   }
+  function syncCustomerFromProject() {
+    if (projSel.value) {
+      const opt = projSel.options[projSel.selectedIndex];
+      const derivedCustomerId = opt?.dataset?.customerId || '';
+      custSel.value = derivedCustomerId;
+      custSel.disabled = true;
+      custHint.textContent = 'Auto-filled from project. Clear project to edit customer manually.';
+    } else {
+      custSel.disabled = false;
+      custHint.textContent = '';
+    }
+  }
+  typeSel.addEventListener('change', () => { syncTypeVisibility(); syncReasonRequired(); });
+  projSel.addEventListener('change', () => { syncCustomerFromProject(); syncReasonRequired(); });
+  custSel.addEventListener('change', syncReasonRequired);
+  syncTypeVisibility();
+  syncCustomerFromProject();
 
   // Reason field is required for flag/reject AND for any re-categorisation
   function syncReasonRequired() {
     const action = document.getElementById('review-action').value;
-    const projChanged = canRecategorise && document.getElementById('reassign-project').value !== currentProjectId;
-    const custChanged = canRecategorise && document.getElementById('reassign-customer').value !== currentCustomerId;
-    const needsReason = action === 'flag' || action === 'reject' || projChanged || custChanged;
+    const typeChanged = typeSel.value !== entry.entry_type;
+    const projChanged = (projSel.value || '') !== currentProjectId;
+    const custChanged = (custSel.value || '') !== currentCustomerId;
+    const needsReason = action === 'flag' || action === 'reject' || typeChanged || projChanged || custChanged;
     document.getElementById('review-reason-row').style.display = needsReason ? '' : 'none';
   }
   document.getElementById('review-action').addEventListener('change', syncReasonRequired);
-  if (canRecategorise) {
-    document.getElementById('reassign-project').addEventListener('change', syncReasonRequired);
-    document.getElementById('reassign-customer').addEventListener('change', syncReasonRequired);
-  }
   syncReasonRequired();
 
   document.getElementById('review-cancel').addEventListener('click', () => { c.innerHTML = ''; });
   document.getElementById('review-submit').addEventListener('click', async () => {
     const action = document.getElementById('review-action').value;
     const reason = document.getElementById('review-reason').value.trim();
-    const newProjectId = canRecategorise ? (document.getElementById('reassign-project').value || null) : null;
-    const newCustomerId = canRecategorise ? (document.getElementById('reassign-customer').value || null) : null;
-    const projChanged = canRecategorise && (newProjectId || '') !== currentProjectId;
-    const custChanged = canRecategorise && (newCustomerId || '') !== currentCustomerId;
-    const recategorise = projChanged || custChanged;
+    const newEntryType = typeSel.value;
+    const isProjectLike = PROJECT_LIKE_TYPES.includes(newEntryType);
+    const newProjectId = isProjectLike ? (projSel.value || null) : null;
+    const newCustomerId = isProjectLike ? (custSel.value || null) : null;
+    const typeChanged = newEntryType !== entry.entry_type;
+    const projChanged = (newProjectId || '') !== currentProjectId;
+    const custChanged = (newCustomerId || '') !== currentCustomerId;
+    const recategorise = typeChanged || projChanged || custChanged;
 
     if ((action === 'flag' || action === 'reject' || recategorise) && !reason) {
       toast('Reason is required when flagging, rejecting, or re-categorising.', 'error');
@@ -1281,8 +1313,8 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
       return;
     }
     // Project entries must reference a project. PM/CM may have one but don't require it.
-    if (recategorise && entry.entry_type === 'project' && !newProjectId) {
-      toast('Project entries must reference a project. Pick one or change the action.', 'error');
+    if (newEntryType === 'project' && !newProjectId) {
+      toast('Project entries must reference a project. Pick one or change the type.', 'error');
       return;
     }
 
@@ -1293,7 +1325,7 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
     if (recategorise) {
       const { error: rErr } = await sb.rpc('rpc_reassign_work_entry', {
         p_entry_id: entry.id,
-        p_entry_type: entry.entry_type,
+        p_entry_type: newEntryType,
         p_project_id: newProjectId,
         p_customer_id: newCustomerId,
         p_is_cutover: entry.is_cutover,
