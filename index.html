@@ -161,6 +161,8 @@
   .entry-bubble.training { background: rgba(163,113,247,0.1); border-left-color: var(--accent-2); }
   .entry-bubble.admin { background: rgba(63,185,80,0.1); border-left-color: var(--green); }
   .entry-bubble.internal { background: rgba(255,123,114,0.1); border-left-color: var(--pink); }
+  .entry-bubble.pm { background: rgba(76,194,255,0.08); border-left-color: var(--accent); }
+  .entry-bubble.cm { background: rgba(210,153,34,0.12); border-left-color: var(--yellow); }
   .entry-bubble strong { display: block; font-size: 11px; }
   .entry-bubble .small { color: var(--muted); font-size: 10px; }
   /* Review states (Step 26b) */
@@ -537,6 +539,8 @@ async function renderMySchedule() {
         <input type="datetime-local" id="manual-end" />
         <select id="manual-type">
           <option value="project">Project</option>
+          <option value="pm">PM (Preventive Maintenance)</option>
+          <option value="cm">CM (Corrective Maintenance)</option>
           <option value="leave">Leave</option>
           <option value="admin">Admin</option>
           <option value="training">Training</option>
@@ -696,6 +700,8 @@ async function openEntryEditModal(entryId, entries) {
           <label>Type</label>
           <select id="edit-type">
             <option value="project" ${entry.entry_type==='project'?'selected':''}>Project</option>
+            <option value="pm" ${entry.entry_type==='pm'?'selected':''}>PM (Preventive Maintenance)</option>
+            <option value="cm" ${entry.entry_type==='cm'?'selected':''}>CM (Corrective Maintenance)</option>
             <option value="leave" ${entry.entry_type==='leave'?'selected':''}>Leave</option>
             <option value="admin" ${entry.entry_type==='admin'?'selected':''}>Admin</option>
             <option value="training" ${entry.entry_type==='training'?'selected':''}>Training</option>
@@ -978,6 +984,10 @@ async function renderTeamWeek() {
                 const typeCls = it.match_status === 'unmatched' ? 'unmatched' : (it.entry_type !== 'project' ? it.entry_type : '');
                 const reviewCls = (it.review_status === 'flagged' || it.review_status === 'rejected') ? it.review_status : '';
                 const cls = [typeCls, reviewCls].filter(Boolean).join(' ');
+                const isMaintenance = it.entry_type === 'pm' || it.entry_type === 'cm';
+                const maintTag = isMaintenance
+                  ? `<span class="badge" style="background: ${it.entry_type==='pm'?'rgba(76,194,255,0.2)':'rgba(210,153,34,0.2)'}; color: ${it.entry_type==='pm'?'var(--accent)':'var(--yellow)'}; padding: 1px 4px; font-size: 9px; font-weight: 700; margin-right: 4px;">${it.entry_type.toUpperCase()}</span>`
+                  : '';
                 const customerLabel = it.customers?.name ? escapeHtml(it.customers.name) : (it.entry_type !== 'project' ? it.entry_type : 'unmatched');
                 const projLabel = it.projects?.project_code ? `<span class="badge">${escapeHtml(it.projects.project_code)}</span>` : '';
                 const reasonHint = (it.review_status === 'flagged' || it.review_status === 'rejected') && it.review_reason
@@ -985,7 +995,7 @@ async function renderTeamWeek() {
                   : '';
                 const clickable = isManager ? 'data-clickable="1"' : '';
                 return `<div class="entry-bubble ${cls}" data-entry-id="${it.id}" ${clickable}>
-                  <strong>${customerLabel}</strong>
+                  <strong>${maintTag}${customerLabel}</strong>
                   <span class="small">${fmtTime(it.start_at)} · ${hoursBetween(it.start_at, it.end_at)}h</span>
                   ${projLabel}
                   ${reasonHint}
@@ -1042,10 +1052,52 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
       : '<span style="color: var(--red);">✕ Rejected</span>';
   const customerLabel = entry.customers?.name ? escapeHtml(entry.customers.name) : '—';
 
-  // Re-categorise dropdowns are only meaningful for project entries
-  const isProjectEntry = entry.entry_type === 'project';
+  // Friendly entry type labels
+  const TYPE_LABELS = {
+    project: 'Project',
+    pm: 'PM (Preventive Maintenance)',
+    cm: 'CM (Corrective Maintenance)',
+    leave: 'Leave',
+    admin: 'Admin',
+    training: 'Training',
+    standby: 'Standby',
+    internal: 'Internal',
+    unmatched: 'Unmatched'
+  };
+  const typeLabel = TYPE_LABELS[entry.entry_type] || entry.entry_type;
+
+  // Re-categorise dropdowns are meaningful for project/pm/cm (all three can have a project)
+  const canRecategorise = ['project','pm','cm'].includes(entry.entry_type);
   const currentProjectId = entry.project_id || '';
   const currentCustomerId = entry.customer_id || '';
+
+  // Source provenance block — managers want to see whether an entry came from
+  // calendar sync (and from whom, to whom) or was manually entered.
+  let sourceBlockHtml = '';
+  if (entry.source === 'calendar_sync') {
+    const organizer = entry.organizer_email
+      ? escapeHtml(entry.organizer_email)
+      : '<span style="color: var(--muted); font-style: italic;">unknown</span>';
+    const domains = Array.isArray(entry.attendee_domains) && entry.attendee_domains.length > 0
+      ? entry.attendee_domains.map(d => `<span class="badge" style="margin-right: 4px;">${escapeHtml(d)}</span>`).join('')
+      : '<span style="color: var(--muted); font-style: italic;">none recorded</span>';
+    sourceBlockHtml = `
+      <div style="border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; font-size: 12px; color: var(--muted);">
+        <div style="font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Source: calendar sync</div>
+        <div style="line-height: 1.7;">
+          <span style="color: var(--muted);">From:</span> ${organizer}<br>
+          <span style="color: var(--muted);">Attendee domains:</span> ${domains}
+        </div>
+      </div>
+    `;
+  } else {
+    sourceBlockHtml = `
+      <div style="border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px;">
+        <div style="font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Source: manual entry</div>
+        <div style="font-size: 12px; color: var(--muted);">Logged directly by ${escapeHtml(engName)}.</div>
+      </div>
+    `;
+  }
 
   // Build project options
   const projectOptions = (projectsList || []).map(p =>
@@ -1062,14 +1114,16 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
         <div style="color: var(--muted); font-size: 12px; margin-bottom: 12px; line-height: 1.6;">
           <strong style="color: var(--text);">${escapeHtml(engName)}</strong><br>
           ${escapeHtml(fmtDateTime(entry.start_at))} → ${escapeHtml(fmtDateTime(entry.end_at))} · ${hoursBetween(entry.start_at, entry.end_at)}h<br>
-          Type: ${escapeHtml(entry.entry_type)}<br>
+          Type: ${escapeHtml(typeLabel)}<br>
           ${entry.raw_title ? 'Title: ' + escapeHtml(entry.raw_title) + '<br>' : ''}
           Status: ${statusBadge}
           ${reviewerName ? `<br><span style="font-size: 11px;">Last reviewed by ${escapeHtml(reviewerName)} · ${fmtDateTime(entry.reviewed_at)}</span>` : ''}
           ${entry.review_reason ? `<br><span style="font-size: 11px; font-style: italic;">"${escapeHtml(entry.review_reason)}"</span>` : ''}
         </div>
 
-        ${isProjectEntry ? `
+        ${sourceBlockHtml}
+
+        ${canRecategorise ? `
         <div style="border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px;">
           <div style="font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Re-categorise (optional)</div>
           <div class="modal-row">
@@ -1090,7 +1144,7 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
         </div>
         ` : `
         <div style="border-top: 1px solid var(--border); padding: 10px 0; margin-top: 10px; font-size: 11px; color: var(--muted); font-style: italic;">
-          To re-categorise this ${escapeHtml(entry.entry_type)} entry, flag it and have the engineer re-create as a project entry.
+          To re-categorise this ${escapeHtml(typeLabel)} entry, flag it and have the engineer re-create as a project entry.
         </div>
         `}
 
@@ -1119,8 +1173,8 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
     </div>
   `;
 
-  // Project ↔ customer auto-fill + lock (only if project entry)
-  if (isProjectEntry) {
+  // Project ↔ customer auto-fill + lock (only when re-categorise UI is shown)
+  if (canRecategorise) {
     const projSel = document.getElementById('reassign-project');
     const custSel = document.getElementById('reassign-customer');
     const custHint = document.getElementById('reassign-customer-hint');
@@ -1143,13 +1197,13 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
   // Reason field is required for flag/reject AND for any re-categorisation
   function syncReasonRequired() {
     const action = document.getElementById('review-action').value;
-    const projChanged = isProjectEntry && document.getElementById('reassign-project').value !== currentProjectId;
-    const custChanged = isProjectEntry && document.getElementById('reassign-customer').value !== currentCustomerId;
+    const projChanged = canRecategorise && document.getElementById('reassign-project').value !== currentProjectId;
+    const custChanged = canRecategorise && document.getElementById('reassign-customer').value !== currentCustomerId;
     const needsReason = action === 'flag' || action === 'reject' || projChanged || custChanged;
     document.getElementById('review-reason-row').style.display = needsReason ? '' : 'none';
   }
   document.getElementById('review-action').addEventListener('change', syncReasonRequired);
-  if (isProjectEntry) {
+  if (canRecategorise) {
     document.getElementById('reassign-project').addEventListener('change', syncReasonRequired);
     document.getElementById('reassign-customer').addEventListener('change', syncReasonRequired);
   }
@@ -1159,10 +1213,10 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
   document.getElementById('review-submit').addEventListener('click', async () => {
     const action = document.getElementById('review-action').value;
     const reason = document.getElementById('review-reason').value.trim();
-    const newProjectId = isProjectEntry ? (document.getElementById('reassign-project').value || null) : null;
-    const newCustomerId = isProjectEntry ? (document.getElementById('reassign-customer').value || null) : null;
-    const projChanged = isProjectEntry && (newProjectId || '') !== currentProjectId;
-    const custChanged = isProjectEntry && (newCustomerId || '') !== currentCustomerId;
+    const newProjectId = canRecategorise ? (document.getElementById('reassign-project').value || null) : null;
+    const newCustomerId = canRecategorise ? (document.getElementById('reassign-customer').value || null) : null;
+    const projChanged = canRecategorise && (newProjectId || '') !== currentProjectId;
+    const custChanged = canRecategorise && (newCustomerId || '') !== currentCustomerId;
     const recategorise = projChanged || custChanged;
 
     if ((action === 'flag' || action === 'reject' || recategorise) && !reason) {
@@ -1173,7 +1227,7 @@ function openReviewModal(entry, engineersById, projectsList, customersList) {
       toast('Nothing to save — change an action or re-categorise.', 'error');
       return;
     }
-    // Project entries must reference a project (the RPC enforces this; check up front for nicer UX)
+    // Project entries must reference a project. PM/CM may have one but don't require it.
     if (recategorise && entry.entry_type === 'project' && !newProjectId) {
       toast('Project entries must reference a project. Pick one or change the action.', 'error');
       return;
