@@ -1085,7 +1085,7 @@ function _bindProjectRowHandlers() {
     btn.addEventListener('click', async () => {
       const { error } = await sb.rpc('rpc_set_project_status', {
         p_project_id: btn.dataset.id,
-        p_status: btn.dataset.status
+        p_new_status: btn.dataset.status
       });
       if (error) { toast(error.message, 'error'); return; }
       toast('Status updated.', 'success');
