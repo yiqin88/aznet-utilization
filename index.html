@@ -590,7 +590,15 @@ async function renderMySchedule() {
     <div class="panel">
       <div style="display:flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
         <h2 style="margin: 0;">My projects</h2>
-        <span id="my-projects-count" style="color: var(--muted); font-size: 11px;"></span>
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <span id="my-projects-count" style="color: var(--muted); font-size: 11px;"></span>
+          <select id="my-projects-filter">
+            <option value="all">All</option>
+            <option value="active" selected>Active</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
       </div>
       <p style="color: var(--muted); font-size: 11px; margin-top: -4px;">
         Projects you are assigned to. Lead-engineer assignments are marked.
@@ -724,6 +732,12 @@ async function renderMySchedule() {
   });
   renderEntriesTable(entries);
   renderMyProjects();
+
+  // Wire the My projects status filter (re-renders without re-fetching)
+  const myProjFilter = document.getElementById('my-projects-filter');
+  if (myProjFilter) {
+    myProjFilter.addEventListener('change', () => renderMyProjects());
+  }
 }
 
 // Render the "My projects" panel: shows projects this engineer is assigned to,
@@ -744,10 +758,24 @@ async function renderMyProjects() {
     return;
   }
 
-  const rows = (assignments || []).filter(a => a.projects && a.projects.status !== 'deleted');
-  if (rows.length === 0) {
+  const allRows = (assignments || []).filter(a => a.projects && a.projects.status !== 'deleted');
+
+  if (allRows.length === 0) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--muted); padding: 14px;">No project assignments yet. Ask a manager to assign you.</td></tr>';
     counter.textContent = '0 projects';
+    return;
+  }
+
+  // Apply the user-selected status filter (default 'active' on first load).
+  const filterEl = document.getElementById('my-projects-filter');
+  const filterVal = filterEl ? filterEl.value : 'active';
+  const rows = filterVal === 'all'
+    ? allRows
+    : allRows.filter(a => a.projects.status === filterVal);
+
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--muted); padding: 14px;">No ${filterVal} projects. Try a different filter.</td></tr>`;
+    counter.textContent = `0 of ${allRows.length} projects`;
     return;
   }
 
@@ -799,7 +827,7 @@ async function renderMyProjects() {
       </tr>
     `;
   }).join('');
-  counter.textContent = `${rows.length} project${rows.length===1?'':'s'}`;
+  counter.textContent = filterVal === 'all' ? `${rows.length} project${rows.length===1?'':'s'}` : `${rows.length} of ${allRows.length} projects`;
 }
 
 function renderEntriesTable(entries) {
